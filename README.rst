@@ -135,4 +135,4 @@ To compile the setup wizard with custom credential prompting:
 License
 =======
 
-Distributed under the MIT License. Built with ❤️ by **VinnovateIT**.
+Distributed under the MIT License. 
