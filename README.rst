@@ -7,10 +7,16 @@ Loqin PC - Automated Hostel Wi-Fi Connection Client
 .. image:: https://img.shields.io/badge/GUI-PyQt6-green.svg
    :target: https://pypi.org/project/PyQt6/
 .. image:: https://img.shields.io/badge/Platform-Windows-lightgrey.svg
-.. image:: https://img.shields.io/badge/Maintained%20by-VinnovateIT-orange.svg
-   :target: https://github.com/vinnovateit
+.. image:: https://img.shields.io/badge/Maintained%20by-Aayush%20Srivastava-orange.svg
+   :target: https://aayushsrivastava.pythonanywhere.com/
+.. image:: https://img.shields.io/badge/version-1.1.0-blue.svg
+   :target: https://github.com/notaayushsrivastava/Loqin/releases
+.. image:: https://img.shields.io/badge/License-GPLv3-blue.svg
+   :target: LICENSE
+   :alt: License: GPL v3
 
-Connect once, forget forever. **Loqin PC** is a lightweight Windows system tray application designed to automatically authenticate and keep you connected to hostel Wi-Fi captive portals.
+Connect once, forget forever. **Loqin PC** is a lightweight Windows system tray application designed to automatically authenticate and keep you connected to VIT hostel Wi-Fi.
+Made for and by VITians.
 
 .. contents:: Table of Contents
    :depth: 2
@@ -76,8 +82,8 @@ Installation Steps
 
    .. code-block:: bash
 
-      git clone https://github.com/vinnovateit/loqin-pc.git
-      cd loqin-pc
+      git clone https://github.com/notaayushsrivastava/Loqin
+      cd loqin
 
 2. Create and activate a virtual environment:
 
@@ -90,13 +96,13 @@ Installation Steps
 
    .. code-block:: bash
 
-      pip install PyQt6 requests keyring Pillow pyinstaller
+      pip install -r requirements.txt
 
 4. Run the app:
 
    .. code-block:: bash
 
-      python latch_app.py
+      python app.py
 
 
 Building the Executable
@@ -104,19 +110,11 @@ Building the Executable
 
 To package the application into a single standalone ``.exe`` file:
 
-1. Ensure ``loqin_logo_small.png`` and ``loqin_icon.ico`` are present in the root folder.
+1. Ensure ``loqin_logo_small.png`` is present in the root folder.
 2. Execute PyInstaller:
 
    .. code-block:: bash
-
-      pyinstaller --noconsole \
-                  --onefile \
-                  --add-data "loqin_logo_small.png;." \
-                  --icon="loqin_icon.ico" \
-                  --version-file="version_info.txt" \
-                  --name="Loqin" \
-                  --clean \
-                  latch_app.py
+      pyinstaller --noconsole --onefile --add-data "loqin_logo_small.png;." --icon="loqin_logo_small.png" --version-file="version_info.txt" --name="Loqin" --clean app.py
 
 3. The output executable will be placed in the ``dist/`` directory.
 
@@ -129,10 +127,12 @@ To compile the setup wizard with custom credential prompting:
 1. Download and install `Inno Setup <https://jrsoftware.org/isdl.php>`_.
 2. Open ``latch_installer_script.iss`` in Inno Setup.
 3. Click **Compile** (or press ``Ctrl + F9``).
-4. Find the finished installer inside the ``InstallerOutput/`` folder.
+4. Find the finished installer inside the ``Output/`` folder.
 
 
 License
 =======
 
-Distributed under the MIT License. Built with ❤️ by **VinnovateIT**.
+Distributed under the MIT License.
+
+Copyright (c) 2026 Aayush Srivastava.

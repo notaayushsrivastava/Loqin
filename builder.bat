@@ -1,1 +1,0 @@
-pyinstaller --noconsole --onefile --add-data "loqin_logo_small.png;." --icon="loqin_logo_small.png" --version-file="version_info.txt" --name="Loqin" --clean app.py

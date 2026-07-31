@@ -36,5 +36,5 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     version='version_info.txt',
-    icon=['loqin_logo_small.png'],
+    icon=['loqin_icon.ico'],
 )
