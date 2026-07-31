@@ -1,6 +1,10 @@
 ===================================================
-Loqin PC - Automated Hostel Wi-Fi Connection Client
+Loqin PC - Automated VIT Hostel Wi-Fi Client
 ===================================================
+
+.. image:: wizard_banner.bmp
+   :width: 100%
+   :alt: Loqin PC Banner
 
 .. image:: https://img.shields.io/badge/Python-3.8%2B-blue.svg
    :target: https://www.python.org/
@@ -133,10 +137,6 @@ To compile the setup wizard with custom credential prompting:
 License
 =======
 
-<<<<<<< HEAD
 Distributed under the MIT License.
 
 Copyright (c) 2026 Aayush Srivastava.
-=======
-Distributed under the MIT License. 
->>>>>>> 37da856b435d995543314fa94145eb2bc36e5a43
