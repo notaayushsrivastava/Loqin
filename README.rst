@@ -137,6 +137,6 @@ To compile the setup wizard with custom credential prompting:
 License
 =======
 
-Distributed under the MIT License.
+Distributed under the GNU GPL-3 License.
 
 Copyright (c) 2026 Aayush Srivastava.
