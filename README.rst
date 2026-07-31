@@ -133,6 +133,10 @@ To compile the setup wizard with custom credential prompting:
 License
 =======
 
+<<<<<<< HEAD
 Distributed under the MIT License.
 
 Copyright (c) 2026 Aayush Srivastava.
+=======
+Distributed under the MIT License. 
+>>>>>>> 37da856b435d995543314fa94145eb2bc36e5a43
