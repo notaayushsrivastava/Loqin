@@ -2,10 +2,10 @@
 
 
 a = Analysis(
-    ['app.py'],
+    ['production_app.py'],
     pathex=[],
     binaries=[],
-    datas=[('loqin_logo_small.png', '.')],
+    datas=[('assets', 'assets')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -36,5 +36,5 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     version='version_info.txt',
-    icon=['loqin_icon.ico'],
+    icon=['assets\\loqin_logo_small.png'],
 )

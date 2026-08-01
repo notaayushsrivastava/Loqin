@@ -6,6 +6,10 @@ Loqin PC - Automated VIT Hostel Wi-Fi Client
    :width: 100%
    :alt: Loqin PC Banner
 
+.. image:: https://img.shields.io/badge/Download-Loqin_Installer-0078D4?style=for-the-badge&logo=windows&logoColor=white
+   :target: https://github.com/notaayushsrivastava/Loqin/raw/refs/heads/master/Output/Install_Loqin.exe
+   :alt: Download Loqin PC Installer
+
 .. image:: https://img.shields.io/badge/Python-3.8%2B-blue.svg
    :target: https://www.python.org/
 .. image:: https://img.shields.io/badge/GUI-PyQt6-green.svg
@@ -13,7 +17,7 @@ Loqin PC - Automated VIT Hostel Wi-Fi Client
 .. image:: https://img.shields.io/badge/Platform-Windows-lightgrey.svg
 .. image:: https://img.shields.io/badge/Maintained%20by-Aayush%20Srivastava-orange.svg
    :target: https://aayushsrivastava.pythonanywhere.com/
-.. image:: https://img.shields.io/badge/version-1.1.0-blue.svg
+.. image:: https://img.shields.io/badge/version-1.1.2-blue.svg
    :target: https://github.com/notaayushsrivastava/Loqin/releases
 .. image:: https://img.shields.io/badge/License-GPLv3-blue.svg
    :target: LICENSE

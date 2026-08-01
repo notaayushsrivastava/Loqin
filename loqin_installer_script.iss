@@ -1,7 +1,7 @@
 [Setup]
 AppId={{A2B3C4D5-1234-5678-90AB-CDEF12345678}
 AppName=Loqin
-AppVersion=1.1.0
+AppVersion=1.1.2
 AppPublisher=Aayush Srivastava
 AppCopyright=Copyright (C) 2026 Aayush Srivastava. All rights reserved.
 AppPublisherURL=https://github.com/notaayushsrivastava
@@ -25,9 +25,9 @@ UninstallDisplayName=Loqin
 UninstallDisplayIcon={app}\Loqin.exe
 
 ; --- BRANDING & LOGOS ---
-SetupIconFile=loqin_icon.ico
-WizardImageFile=wizard_banner.bmp
-WizardSmallImageFile=wizard_logo.bmp
+SetupIconFile=assets/loqin_icon.ico
+WizardImageFile=assets/wizard_banner.bmp
+WizardSmallImageFile=assets/wizard_logo.bmp
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -43,7 +43,7 @@ Name: "autostart"; Description: "Launch Loqin automatically on Windows startup";
 
 [Files]
 Source: "dist\Loqin.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "loqin_logo_small.png"; DestDir: "{app}"; Flags: ignoreversion
+Source: "assets\loqin_logo_small.png"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\Loqin"; Filename: "{app}\Loqin.exe"; AppUserModelID: "Loqin"
@@ -62,41 +62,45 @@ Filename: "{app}\Loqin.exe"; Description: "{cm:LaunchProgram,Loqin}"; Flags: now
 
 ; --- PASCAL SCRIPTING FOR CUSTOM UI, PROCESS MANAGEMENT & CONFIG GENERATION ---
 [Code]
+var
+  UserCredentialsPage: TInputQueryWizardPage;
+  ShowPasswordCheckBox: TCheckBox;
+
 procedure CustomizeHorizontalBanner();
 var
   BannerHeight: Integer;
 begin
-  // Dynamically calculate height to preserve the exact 1000x400 (2.5:1) aspect ratio
-  BannerHeight := (WizardForm.WelcomePage.Width * 400) div 1000;
+  // Increase overall wizard window height slightly to prevent any vertical cramping
+  WizardForm.ClientHeight := WizardForm.ClientHeight + 35;
+  WizardForm.ClientWidth := WizardForm.ClientWidth + 20;
+
+  // Dynamically calculate banner height with a slightly expanded proportion
+  BannerHeight := (WizardForm.WelcomePage.Width * 420) div 1000;
 
   // --- WELCOME PAGE FORMATTING ---
   WizardForm.WizardBitmapImage.SetBounds(0, 0, WizardForm.WelcomePage.Width, BannerHeight);
   WizardForm.WizardBitmapImage.Stretch := True;
 
-  // Title & description positioning matching Finished page specs
-  WizardForm.WelcomeLabel1.SetBounds(20, BannerHeight + 12, WizardForm.WelcomePage.Width - 40, 40);
+  WizardForm.WelcomeLabel1.SetBounds(20, BannerHeight + 18, WizardForm.WelcomePage.Width - 40, 50);
   WizardForm.WelcomeLabel2.SetBounds(
     20, 
-    BannerHeight + 55, 
+    BannerHeight + 75, 
     WizardForm.WelcomePage.Width - 40, 
-    WizardForm.WelcomePage.Height - (BannerHeight + 65)
+    WizardForm.WelcomePage.Height - (BannerHeight + 75)
   );
 
-  // --- FINISHED PAGE FORMATTING (IDENTICAL LAYOUT) ---
+  // --- FINISHED PAGE FORMATTING ---
   WizardForm.WizardBitmapImage2.SetBounds(0, 0, WizardForm.FinishedPage.Width, BannerHeight);
   WizardForm.WizardBitmapImage2.Stretch := True;
 
-  WizardForm.FinishedHeadingLabel.SetBounds(20, BannerHeight + 12, WizardForm.FinishedPage.Width - 40, 40);
+  WizardForm.FinishedHeadingLabel.SetBounds(20, BannerHeight + 18, WizardForm.FinishedPage.Width - 40, 50);
   WizardForm.FinishedLabel.SetBounds(
     20, 
-    BannerHeight + 55, 
+    BannerHeight + 75, 
     WizardForm.FinishedPage.Width - 40, 
-    WizardForm.FinishedPage.Height - (BannerHeight + 65)
+    WizardForm.FinishedLabel.Height - (BannerHeight + 75)
   );
 end;
-
-var
-  UserCredentialsPage: TInputQueryWizardPage;
 
 // Terminate running Loqin instance before starting setup
 function InitializeSetup(): Boolean;
@@ -107,9 +111,33 @@ begin
   Result := True;
 end;
 
+// Safely force Registration Number to uppercase as the user types
+procedure RegNoEditOnChange(Sender: TObject);
+var
+  LEdit: TEdit;
+  SelStart: Integer;
+begin
+  if Sender is TEdit then
+  begin
+    LEdit := Sender as TEdit;
+    SelStart := LEdit.SelStart;
+    LEdit.Text := Uppercase(LEdit.Text);
+    LEdit.SelStart := SelStart;
+  end;
+end;
+
+// Toggle Password Masking
+procedure ShowPasswordOnClick(Sender: TObject);
+begin
+  if ShowPasswordCheckBox.Checked then
+    UserCredentialsPage.Edits[1].Password := False
+  else
+    UserCredentialsPage.Edits[1].Password := True;
+end;
+
 procedure InitializeWizard();
 begin
-  // Apply symmetrical banner layout to Welcome and Final pages
+  // Apply symmetrical banner layout and expand window height
   CustomizeHorizontalBanner();
 
   // Custom copyright watermark footer
@@ -126,6 +154,18 @@ begin
 
   UserCredentialsPage.Add('Registration Number / Username:', False);
   UserCredentialsPage.Add('Password:', True);
+
+  // Attach safe uppercase handler
+  UserCredentialsPage.Edits[0].OnChange := @RegNoEditOnChange;
+
+  // Setup Show Password Checkbox with extra vertical spacing
+  ShowPasswordCheckBox := TCheckBox.Create(UserCredentialsPage);
+  ShowPasswordCheckBox.Parent := UserCredentialsPage.Surface;
+  ShowPasswordCheckBox.Caption := 'Show Password';
+  ShowPasswordCheckBox.Left := UserCredentialsPage.Edits[1].Left;
+  ShowPasswordCheckBox.Top := UserCredentialsPage.Edits[1].Top + UserCredentialsPage.Edits[1].Height + 12;
+  ShowPasswordCheckBox.Width := UserCredentialsPage.Edits[1].Width;
+  ShowPasswordCheckBox.OnClick := @ShowPasswordOnClick;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -147,7 +187,7 @@ var
 begin
   if CurStep = ssPostInstall then
   begin
-    Username := UserCredentialsPage.Values[0];
+    Username := Uppercase(Trim(UserCredentialsPage.Values[0]));
     Password := UserCredentialsPage.Values[1];
 
     ConfigDir := ExpandConstant('{userappdata}\Loqin');

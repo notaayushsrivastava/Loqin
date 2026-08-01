@@ -8,24 +8,51 @@ import psutil
 import subprocess
 import pyqtgraph as pg
 import ctypes
+import ctypes.wintypes
 from PyQt6.QtWidgets import (
     QApplication, QSystemTrayIcon, QMenu, QDialog, QVBoxLayout, 
     QHBoxLayout, QLabel, QLineEdit, QPushButton, QSpinBox, 
-    QCheckBox, QMessageBox, QDialog, QVBoxLayout, QLabel, QProgressDialog
+    QCheckBox, QMessageBox, QDialog, QVBoxLayout, QLabel, QProgressDialog,
+    QDialog, QVBoxLayout, QTextBrowser, QDialogButtonBox
 )
 from PyQt6.QtGui import QIcon, QAction, QPixmap, QColor, QPainter, QDesktopServices
-from PyQt6.QtCore import QThread, pyqtSignal, Qt, QTimer, QUrl
+from PyQt6.QtCore import QThread, pyqtSignal, Qt, QTimer, QUrl, QAbstractNativeEventFilter
 
 
 APP_NAME = "Loqin"
 APPDATA_DIR = os.path.join(os.getenv("APPDATA", os.path.expanduser("~")), "Loqin")
 CONFIG_FILE = os.path.join(APPDATA_DIR, "Loqin_config.json")
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 GITHUB_API_URL = "https://api.github.com/repos/notaayushsrivastava/loqin/releases/latest"
 
 # --- WINDOWS STARTUP REGISTRY HELPER ---
 REG_PATH = r"Software\Microsoft\Windows\CurrentVersion\Run"
 APP_REG_NAME = "Loqin"
+
+MUTEX_NAME = "Global\\Loqin_SingleInstance_Mutex_AayushSrivastava"
+
+# --- Windows API Power Broadcast Constants ---
+WM_POWERBROADCAST = 0x0218
+PBT_APMSUSPEND = 0x0004            # System is suspending (Sleep)
+PBT_APMRESUMEAUTOMATIC = 0x0012    # System resumed automatically
+
+def ensure_single_instance():
+    # Create or open named mutex
+    kernel32 = ctypes.windll.kernel32
+    mutex = kernel32.CreateMutexW(None, False, MUTEX_NAME)
+    
+    # ERROR_ALREADY_EXISTS = 183
+    if kernel32.GetLastError() == 183:
+        # Create temporary QApplication to display warning message
+        app = QApplication(sys.argv)
+        QMessageBox.warning(
+            None, 
+            "Loqin Already Running", 
+            "Another instance of Loqin is already running in the system tray."
+        )
+        sys.exit(0)
+    
+    return mutex
 
 def set_auto_start(enabled: bool):
     """Add or remove the app from Windows Registry run-on-startup."""
@@ -70,10 +97,14 @@ def is_auto_start_enabled() -> bool:
 def resource_path(relative_path):
     """Get absolute path to resource, works for dev and PyInstaller"""
     try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
         base_path = sys._MEIPASS
     except Exception:
+        # In dev mode, the base path is the current working directory
         base_path = os.path.abspath(".")
-    return os.path.join(base_path, relative_path)
+        
+    # Automatically route all requests through the new 'assets' folder
+    return os.path.join(base_path, "assets", relative_path)
 
 def create_status_icon(color_type: str) -> QIcon:
     """Generates a smooth colored circle icon (Green, Yellow, Red) for status indicators."""
@@ -95,37 +126,70 @@ def create_status_icon(color_type: str) -> QIcon:
     return QIcon(pixmap)
 
 
+class PowerEventFilter(QAbstractNativeEventFilter):
+    def __init__(self, tray_app):
+        super().__init__()
+        self.tray_app = tray_app
+
+    def nativeEventFilter(self, eventType, message):
+        """Intercept native Windows messages to detect sleep/wake"""
+        
+        # message is a memory address pointing to the Windows MSG structure.
+        # We use ctypes.wintypes to extract the data.
+        msg = ctypes.wintypes.MSG.from_address(int(message))
+        
+        if msg.message == WM_POWERBROADCAST:
+            if msg.wParam == PBT_APMSUSPEND:
+                # Safely set the worker to paused using the existing attribute
+                if hasattr(self.tray_app, 'worker') and self.tray_app.worker:
+                    self.tray_app.worker.is_paused = True
+                    
+            elif msg.wParam == PBT_APMRESUMEAUTOMATIC:
+                # Safely resume the worker
+                if hasattr(self.tray_app, 'worker') and self.tray_app.worker:
+                    self.tray_app.worker.is_paused = False
+                    
+        # Return False, 0 to allow PyQt to continue processing the event normally
+        return False, 0
+
+
 # --- AUTO-UPDATER THREADS ---
 class UpdateChecker(QThread):
-    update_found = pyqtSignal(str, str, str) # version, download_url, release_notes
+    update_found = pyqtSignal(str, str, str)
 
     def run(self):
         try:
-            res = requests.get(GITHUB_API_URL, timeout=5)
+            # No token needed for public repositories!
+            headers = {
+                "Accept": "application/vnd.github+json"
+            }
+            res = requests.get(GITHUB_API_URL, timeout=5, headers=headers)
+            
             if res.status_code == 200:
                 data = res.json()
                 latest_version_tag = data.get("tag_name", "").replace("v", "")
                 
-                # Simple version comparison (e.g., "1.0.1" > "1.0.0")
                 current_v = tuple(map(int, APP_VERSION.split('.')))
                 latest_v = tuple(map(int, latest_version_tag.split('.')))
                 
                 if latest_v > current_v:
-                    download_url = None
-                    # Find the .exe installer in the release assets
-                    for asset in data.get("assets", []):
-                        if asset["name"].endswith(".exe"):
-                            download_url = asset["browser_download_url"]
-                            break
+                    # Point directly to the raw file on the master branch
+                    download_url = "https://raw.githubusercontent.com/notaayushsrivastava/Loqin/master/Output/Install_Loqin.exe"
                     
-                    if download_url:
-                        self.update_found.emit(latest_version_tag, download_url, data.get("body", "Bug fixes and improvements."))
+                    self.update_found.emit(
+                        latest_version_tag, 
+                        download_url, 
+                        data.get("body", "Bug fixes and improvements.")
+                    )
         except Exception as e:
             print(f"Update check failed: {e}")
 
+
+
+
 class UpdateDownloader(QThread):
     progress = pyqtSignal(int)
-    finished = pyqtSignal(str) # Path to the downloaded .exe
+    finished = pyqtSignal(str)
 
     def __init__(self, url):
         super().__init__()
@@ -133,10 +197,12 @@ class UpdateDownloader(QThread):
 
     def run(self):
         try:
-            res = requests.get(self.url, stream=True, timeout=10)
+            # No token needed here either!
+            res = requests.get(self.url, stream=True, timeout=15, allow_redirects=True)
+            res.raise_for_status() 
+            
             total_size = int(res.headers.get('content-length', 0))
             
-            # Save to Windows Temp folder
             temp_dir = os.environ.get("TEMP", APPDATA_DIR)
             exe_path = os.path.join(temp_dir, "Install_Loqin_Update.exe")
             
@@ -150,8 +216,44 @@ class UpdateDownloader(QThread):
                             self.progress.emit(int((downloaded / total_size) * 100))
             
             self.finished.emit(exe_path)
-        except Exception:
+        except Exception as e:
+            print(f"Download failed: {e}")
             self.finished.emit("")
+
+
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextBrowser, QDialogButtonBox, QLabel
+
+class ReleaseNotesDialog(QDialog):
+    def __init__(self, version, notes, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Update Available")
+        self.resize(480, 380)
+
+        layout = QVBoxLayout(self)
+
+        # 1. Header Text Widget
+        header_label = QLabel(f"<h3>A new version ({version}) of Loqin is available!</h3>")
+        layout.addWidget(header_label)
+
+        # 2. Release Notes Display
+        self.text_browser = QTextBrowser()
+        self.text_browser.setOpenExternalLinks(True)
+        
+        # Format release notes markdown
+        markdown_content = f"**Release Notes:**\n\n{notes}"
+        self.text_browser.setMarkdown(markdown_content)
+        layout.addWidget(self.text_browser)
+
+        # 3. Action Buttons
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Yes | QDialogButtonBox.StandardButton.No
+        )
+        button_box.button(QDialogButtonBox.StandardButton.Yes).setText("Install Now")
+        button_box.button(QDialogButtonBox.StandardButton.No).setText("Later")
+        
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
 
 
 # --- HELPER: Secure Credentials & Config Management ---
@@ -569,6 +671,10 @@ class LoqinTrayApp:
         self.app.setApplicationName("Loqin")
         self.app.setQuitOnLastWindowClosed(False)
 
+        # --- NEW: Install the Power Event Filter ---
+        self.power_filter = PowerEventFilter(self)
+        self.app.installNativeEventFilter(self.power_filter)
+
         icon_path = resource_path("loqin_logo_small.png")
         self.icon = QIcon(icon_path)
         
@@ -765,18 +871,14 @@ class LoqinTrayApp:
         self.update_checker.start()
 
     def prompt_update(self, version, url, notes):
-        # Don't prompt if a dialog is already open
         if hasattr(self, 'progress_dialog') and self.progress_dialog.isVisible():
             return
 
-        reply = QMessageBox.question(
-            None, 
-            "Update Available",
-            f"A new version ({version}) of Loqin is available!\n\nRelease Notes:\n{notes}\n\nWould you like to download and install it now?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
+        dialog = ReleaseNotesDialog(version, notes)
+        dialog.setWindowIcon(self.icon)
+
+        # Exec returns QDialog.DialogCode.Accepted if they click "Install Now"
+        if dialog.exec() == QDialog.DialogCode.Accepted:
             self.start_download(url)
 
     def start_download(self, url):
@@ -798,15 +900,28 @@ class LoqinTrayApp:
     def install_update(self, exe_path):
         self.progress_dialog.close()
         
-        if not exe_path or not os.path.exists(exe_path):
-            QMessageBox.warning(None, "Update Failed", "Failed to download the update package. Please check your internet connection.")
+        # Check if file exists AND is larger than ~1MB (1,000,000 bytes) 
+        # Adjust the size limit if your installer is smaller, but it prevents running empty/text files
+        if not exe_path or not os.path.exists(exe_path) or os.path.getsize(exe_path) < 1000000:
+            QMessageBox.warning(
+                None, 
+                "Update Failed", 
+                "The downloaded update file is corrupted or incomplete. Please download it manually from GitHub."
+            )
             return
             
-        # Launch the newly downloaded installer
-        subprocess.Popen([exe_path])
-        
-        # Exit the current app so the installer can overwrite the files
-        self.app.quit()
+        try:
+            # os.startfile is the native Windows way to "double-click" a file.
+            # It properly triggers UAC Admin prompts which Inno Setup requires.
+            if sys.platform == "win32":
+                os.startfile(exe_path)
+            else:
+                subprocess.Popen([exe_path])
+                
+            # Exit the current app so the installer can overwrite the files
+            self.app.quit()
+        except Exception as e:
+            QMessageBox.critical(None, "Update Error", f"Failed to launch the installer:\n{str(e)}")
 
     def start_monitoring_timer(self):
         if hasattr(self, 'timer') and self.timer:
@@ -822,6 +937,7 @@ class LoqinTrayApp:
 
 
 if __name__ == "__main__":
+    mutex_handle = ensure_single_instance()
     if sys.platform == "win32":
         try:
             myappid = 'Loqin' 
