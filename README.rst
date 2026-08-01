@@ -2,7 +2,7 @@
 Loqin PC - Automated VIT Hostel Wi-Fi Client
 ===================================================
 
-.. image:: wizard_banner.bmp
+.. image:: assets/wizard_banner.bmp
    :width: 100%
    :alt: Loqin PC Banner
 
