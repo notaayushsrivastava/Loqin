@@ -1,7 +1,7 @@
 [Setup]
 AppId={{A2B3C4D5-1234-5678-90AB-CDEF12345678}
 AppName=Loqin
-AppVersion=1.1.2
+AppVersion=1.3.0
 AppPublisher=Aayush Srivastava
 AppCopyright=Copyright (C) 2026 Aayush Srivastava. All rights reserved.
 AppPublisherURL=https://github.com/notaayushsrivastava
@@ -35,7 +35,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 ; --- CUSTOM WELCOME PAGE TEXT ---
 [Messages]
 WelcomeLabel1=Welcome to the Loqin Setup Wizard
-WelcomeLabel2=This wizard will guide you through the installation of Loqin.%n%nLoqin is a background utility designed to automatically monitor and authenticate your captive portal network connections without manual intervention.%n%nCopyright (C) 2026 Aayush Srivastava. All rights reserved.%n%nClick Next to continue, or Cancel to exit Setup.
+WelcomeLabel2=This wizard will guide you through the installation of Loqin.%n%nLoqin is a background utility designed to automatically monitor and authenticate to VIT Wi-Fi. %n%nCopyright (C) 2026 Aayush Srivastava. All rights reserved.%n%nClick Next to continue, or Cancel to exit Setup.
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked

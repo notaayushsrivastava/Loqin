@@ -17,7 +17,7 @@ Loqin PC - Automated VIT Hostel Wi-Fi Client
 .. image:: https://img.shields.io/badge/Platform-Windows-lightgrey.svg
 .. image:: https://img.shields.io/badge/Maintained%20by-Aayush%20Srivastava-orange.svg
    :target: https://aayushsrivastava.pythonanywhere.com/
-.. image:: https://img.shields.io/badge/version-1.2.0-blue.svg
+.. image:: https://img.shields.io/badge/version-1.3.0-blue.svg
    :target: https://github.com/notaayushsrivastava/Loqin/releases
 .. image:: https://img.shields.io/badge/License-GPLv3-blue.svg
    :target: LICENSE
@@ -141,6 +141,6 @@ To compile the setup wizard with custom credential prompting:
 License
 =======
 
-Distributed under the GNU GPL-3 License.
+Copyright (c) 2026 Aayush Srivastava. All rights reserved.
 
-Copyright (c) 2026 Aayush Srivastava.
+This source code is licensed under the GPLv3 License found in the LICENSE file in the root directory of this source tree.

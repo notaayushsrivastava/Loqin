@@ -7,13 +7,18 @@ import keyring
 import psutil
 import subprocess
 import pyqtgraph as pg
+import re
 import ctypes
 import ctypes.wintypes
+from bs4 import BeautifulSoup
+from urllib.parse import urlparse
 from PyQt6.QtWidgets import (
     QApplication, QSystemTrayIcon, QMenu, QDialog, QVBoxLayout, 
     QHBoxLayout, QLabel, QLineEdit, QPushButton, QSpinBox, 
     QCheckBox, QMessageBox, QDialog, QVBoxLayout, QLabel, QProgressDialog,
-    QDialog, QVBoxLayout, QTextBrowser, QDialogButtonBox
+    QDialog, QVBoxLayout, QTextBrowser, QDialogButtonBox, QTableWidget,
+    QHeaderView, QTableWidgetItem, QAbstractItemView, QTabWidget,
+    QWidget, QFormLayout
 )
 from PyQt6.QtGui import QIcon, QAction, QPixmap, QColor, QPainter, QDesktopServices
 from PyQt6.QtCore import QThread, pyqtSignal, Qt, QTimer, QUrl, QAbstractNativeEventFilter
@@ -22,7 +27,7 @@ from PyQt6.QtCore import QThread, pyqtSignal, Qt, QTimer, QUrl, QAbstractNativeE
 APP_NAME = "Loqin"
 APPDATA_DIR = os.path.join(os.getenv("APPDATA", os.path.expanduser("~")), "Loqin")
 CONFIG_FILE = os.path.join(APPDATA_DIR, "Loqin_config.json")
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
 GITHUB_API_URL = "https://api.github.com/repos/notaayushsrivastava/loqin/releases/latest"
 
 # --- WINDOWS STARTUP REGISTRY HELPER ---
@@ -184,8 +189,293 @@ class UpdateChecker(QThread):
         except Exception as e:
             print(f"Update check failed: {e}")
 
+class AccountDetailsDialog(QDialog):
+    # Notice we now pass username and account_url into the dialog
+    def __init__(self, username, account_url, parent=None):
+        super().__init__(parent)
+        self.username = username
+        self.account_url = account_url
+        
+        self.setWindowTitle("Loqin • Account Management")
+        self.setWindowIcon(QIcon(resource_path("loqin_logo_small.png"))) 
+        self.resize(750, 450) 
+        
+        self.setStyleSheet("""
+            QDialog { 
+                background-color: #171A22; 
+            }
+            QLabel {
+                color: #FFFFFF;
+                font-size: 14px;
+            }
+            /* Table Styling */
+            QTableWidget {
+                background-color: #1E222D;
+                color: #DDDDDD;
+                gridline-color: #2C313E;
+                border: 1px solid #2C313E;
+                border-radius: 8px;
+                font-size: 12px;
+            }
+            QHeaderView::section {
+                background-color: #171A22;
+                color: #3da5ff;
+                font-weight: bold;
+                padding: 6px;
+                border: 1px solid #2C313E;
+            }
+            QTableWidget::item { padding: 4px; }
+            
+            /* Tab Styling */
+            QTabWidget::pane { border: 1px solid #2C313E; border-radius: 4px; }
+            QTabBar::tab {
+                background: #1E222D; color: #BBBBBB; padding: 10px 20px; 
+                border: 1px solid #2C313E; border-bottom: none; 
+                border-top-left-radius: 4px; border-top-right-radius: 4px;
+            }
+            QTabBar::tab:selected { background: #171A22; color: #3da5ff; font-weight: bold; }
+            
+            /* Form Styling */
+            QLineEdit {
+                background: #1E222D; color: #FFF; border: 1px solid #2C313E; 
+                border-radius: 4px; padding: 6px; font-size: 14px;
+            }
+            QPushButton {
+                background: #3da5ff; color: #171A22; font-weight: bold; 
+                border-radius: 4px; padding: 8px; font-size: 14px;
+            }
+            QPushButton:hover { background: #2b8ee0; }
+        """)
 
+        layout = QVBoxLayout(self)
+        self.tabs = QTabWidget(self)
+        layout.addWidget(self.tabs)
 
+        # Build Tabs
+        self.setup_history_tab()
+        self.setup_password_tab()
+
+    def setup_history_tab(self):
+        self.history_tab = QWidget()
+        layout = QVBoxLayout(self.history_tab)
+        
+        title = QLabel("<b>Recent Network Sessions</b>")
+        title.setStyleSheet("font-size: 16px; margin-bottom: 5px;")
+        layout.addWidget(title)
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(7)
+        self.table.setHorizontalHeaderLabels([
+            "Location", "Login Time", "Logout Time", 
+            "Usage Time", "Upload", "Download", "Total Data"
+        ])
+        
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        header.setStretchLastSection(True) 
+        self.table.verticalHeader().setVisible(False) 
+        
+        layout.addWidget(self.table)
+        self.tabs.addTab(self.history_tab, "Usage History")
+
+    def create_password_field(self):
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(5)
+        
+        line_edit = QLineEdit()
+        line_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        line_edit.setFixedWidth(250)
+        
+        toggle_btn = QPushButton("👁")
+        toggle_btn.setFixedSize(32, 32)
+        toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        toggle_btn.setCheckable(True)
+        toggle_btn.setStyleSheet("""
+            QPushButton {
+                background: #1E222D; 
+                color: #BBBBBB; 
+                border: 1px solid #2C313E; 
+                border-radius: 4px; 
+                font-size: 14px;
+            }
+            QPushButton:checked {
+                background: #3da5ff; 
+                color: #171A22; 
+                border: 1px solid #3da5ff;
+            }
+            QPushButton:hover {
+                border: 1px solid #3da5ff;
+            }
+        """)
+        
+        def on_toggle(checked):
+            if checked:
+                line_edit.setEchoMode(QLineEdit.EchoMode.Normal)
+                toggle_btn.setText("🔒")
+            else:
+                line_edit.setEchoMode(QLineEdit.EchoMode.Password)
+                toggle_btn.setText("👁")
+                
+        toggle_btn.toggled.connect(on_toggle)
+        
+        layout.addWidget(line_edit)
+        layout.addWidget(toggle_btn)
+        return container, line_edit
+
+    def setup_password_tab(self):
+        self.password_tab = QWidget()
+        layout = QVBoxLayout(self.password_tab)
+        
+        title = QLabel("<b>Reset Network Password</b>")
+        title.setStyleSheet("font-size: 16px; margin-bottom: 10px;")
+        layout.addWidget(title)
+        
+        form_layout = QFormLayout()
+        form_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        form_layout.setFormAlignment(Qt.AlignmentFlag.AlignTop)
+        form_layout.setSpacing(15)
+
+        container_old, self.old_pw_input = self.create_password_field()
+        container_new, self.new_pw_input = self.create_password_field()
+        container_confirm, self.confirm_pw_input = self.create_password_field()
+
+        form_layout.addRow("Current Password:", container_old)
+        form_layout.addRow("New Password:", container_new)
+        form_layout.addRow("Confirm Password:", container_confirm)
+        
+        layout.addLayout(form_layout)
+        
+        # Forgot Password Button
+        forgot_btn = QPushButton("Forgot Password?")
+        forgot_btn.setFixedWidth(287)
+        forgot_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        forgot_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                color: #3da5ff;
+                border: none;
+                font-size: 13px;
+                text-align: left;
+                padding-left: 0px;
+            }
+            QPushButton:hover {
+                text-decoration: underline;
+                color: #5bb3ff;
+            }
+        """)
+        forgot_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://hostelwifi.vit.ac.in/index.php?a=add&category=4")))
+
+        self.update_btn = QPushButton("Update Password")
+        self.update_btn.setFixedWidth(287)
+        self.update_btn.clicked.connect(self.submit_password_change)
+        
+        # Group buttons under form layout
+        btn_layout = QVBoxLayout()
+        btn_layout.setSpacing(6)
+        btn_layout.addWidget(self.update_btn)
+        btn_layout.addWidget(forgot_btn)
+        btn_layout.setContentsMargins(120, 10, 0, 0)
+        layout.addLayout(btn_layout)
+        
+        self.status_label = QLabel("")
+        self.status_label.setStyleSheet("margin-left: 120px;")
+        layout.addWidget(self.status_label)
+        
+        layout.addStretch()
+        self.tabs.addTab(self.password_tab, "Change Password")
+
+    def populate_table(self, rows_data, grand_total_data):
+        self.table.setRowCount(0) 
+        for row_idx, row_data in enumerate(rows_data):
+            self.table.insertRow(row_idx)
+            for col_idx, text in enumerate(row_data):
+                item = QTableWidgetItem(text)
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.table.setItem(row_idx, col_idx, item)
+
+        if grand_total_data:
+            total_row = self.table.rowCount()
+            self.table.insertRow(total_row)
+            
+            total_label_item = QTableWidgetItem("Grand Total")
+            total_label_item.setForeground(QColor("#2ecc71")) 
+            total_label_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table.setItem(total_row, 0, total_label_item)
+            
+            for col_offset, text in enumerate(grand_total_data):
+                item = QTableWidgetItem(text)
+                item.setForeground(QColor("#2ecc71"))
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.table.setItem(total_row, col_offset + 3, item)
+                
+            self.table.setSpan(total_row, 0, 1, 3) 
+
+    def submit_password_change(self):
+        old_pw = self.old_pw_input.text()
+        new_pw = self.new_pw_input.text()
+        confirm_pw = self.confirm_pw_input.text()
+
+        if not old_pw or not new_pw or not confirm_pw:
+            self.status_label.setStyleSheet("color: #f1c40f; margin-left: 120px;")
+            self.status_label.setText("Warning: Please fill all fields.")
+            return
+            
+        if new_pw != confirm_pw:
+            self.status_label.setStyleSheet("color: #e74c3c; margin-left: 120px;")
+            self.status_label.setText("Error: New passwords do not match.")
+            return
+
+        self.status_label.setStyleSheet("color: #3da5ff; margin-left: 120px;")
+        self.status_label.setText("Updating password...")
+        self.update_btn.setEnabled(False)
+        QApplication.processEvents()
+
+        try:
+            # Dynamically parse the IP (e.g., http://136.233.9.110) from the valid session URL
+            parsed = urlparse(self.account_url)
+            base_url = f"{parsed.scheme}://{parsed.netloc}"
+
+            # Use a Session to capture the JSESSIONID cookie automatically
+            session = requests.Session()
+            session.get(f"{base_url}/registration/main.do?content_key=%2FChangePassword.jsp", timeout=5)
+
+            payload = {
+                "changeUserId": self.username,
+                "changePassword": old_pw,
+                "changeNewPassword": new_pw,
+                "changeConfirmNewPassword": confirm_pw,
+                "submit": "Update"
+            }
+            
+            headers = {
+                "Referer": f"{base_url}/registration/main.do?content_key=%2FChangePassword.jsp"
+            }
+
+            response = session.post(f"{base_url}/registration/changePassword.do", data=payload, headers=headers, timeout=5)
+
+            # Pronto generally returns 200 OK whether it succeeds or fails, so we ensure it went through
+            if response.status_code == 200:
+                self.status_label.setStyleSheet("color: #2ecc71; margin-left: 120px; font-weight: bold;")
+                self.status_label.setText("Success! Password updated.")
+                
+                # IMPORTANT: Update your local config file immediately so the app doesn't break
+                # Assuming your config manager has a method like this:
+                # ConfigManager.save_config({"username": self.username}, new_pw)
+
+                keyring.set_password(APP_NAME, self.username, new_pw)
+                
+            else:
+                self.status_label.setStyleSheet("color: #e74c3c; margin-left: 120px;")
+                self.status_label.setText(f"Failed with status: {response.status_code}")
+
+        except Exception as e:
+            self.status_label.setStyleSheet("color: #e74c3c; margin-left: 120px;")
+            self.status_label.setText(f"Connection Error: {e}")
+        finally:
+            self.update_btn.setEnabled(True)
 
 class UpdateDownloader(QThread):
     progress = pyqtSignal(int)
@@ -219,9 +509,6 @@ class UpdateDownloader(QThread):
         except Exception as e:
             print(f"Download failed: {e}")
             self.finished.emit("")
-
-
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextBrowser, QDialogButtonBox, QLabel
 
 class ReleaseNotesDialog(QDialog):
     def __init__(self, version, notes, parent=None):
@@ -336,7 +623,8 @@ class ConfigManager:
 
 # --- WORKER THREAD: Non-blocking Network Ping & Login ---
 class NetworkWorker(QThread):
-    status_signal = pyqtSignal(str, str) 
+    status_signal = pyqtSignal(str, str)
+    account_data_signal = pyqtSignal(str)
 
     def __init__(self, config):
         super().__init__()
@@ -403,12 +691,31 @@ class NetworkWorker(QThread):
         }
 
         try:
-            requests.post(auth_url, data=payload, headers=headers, timeout=5)
+            response = requests.post(auth_url, data=payload, headers=headers, timeout=5)
             if self.check_network_state() == "ONLINE":
                 self.status_signal.emit("Logged in successfully!", "green")
+                html_content = response.text 
+
+                # This regex finds the link, capturing both the FULL URL (Group 1) and just the IP (Group 2)
+                match = re.search(r'href="(http://([0-9\.]+)/registration/Main\.jsp\?sessionId=[^"]+)"', html_content)
+
+                if match:
+                    full_account_url = match.group(1) 
+                    # Example: http://136.233.9.110/registration/Main.jsp?sessionId=1785581532416&wispId=1
+                    
+                    portal_ip = match.group(2)        
+                    # Example: 136.233.9.110
+
+                    print(f"Extracted IP: {portal_ip}")
+                    
+                    # Emit the full URL to the main thread so your account dialog can scrape it
+                    self.account_data_signal.emit(full_account_url)
+                else:
+                    print("Could not find the account link in the response HTML.")
             else:
                 self.status_signal.emit("Login failed. Check credentials.", "error")
-        except Exception:
+        except Exception as e:
+            print(e)
             self.status_signal.emit("Portal timeout or error.", "error")
 
 
@@ -596,11 +903,56 @@ class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Loqin for PC - Settings")
-        self.setFixedSize(380, 270)
+        self.setFixedSize(410, 270)
         self.setWindowIcon(QIcon(resource_path("loqin_logo_small.png")))
         
         self.config = ConfigManager.load_config()
         self.init_ui()
+
+    def create_password_field(self):
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(5)
+        
+        line_edit = QLineEdit()
+        line_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        
+        toggle_btn = QPushButton("👁")
+        toggle_btn.setFixedSize(32, 32)
+        toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        toggle_btn.setCheckable(True)
+        toggle_btn.setStyleSheet("""
+            QPushButton {
+                background: #1E222D; 
+                color: #BBBBBB; 
+                border: 1px solid #2C313E; 
+                border-radius: 4px; 
+                font-size: 14px;
+            }
+            QPushButton:checked {
+                background: #3da5ff; 
+                color: #171A22; 
+                border: 1px solid #3da5ff;
+            }
+            QPushButton:hover {
+                border: 1px solid #3da5ff;
+            }
+        """)
+        
+        def on_toggle(checked):
+            if checked:
+                line_edit.setEchoMode(QLineEdit.EchoMode.Normal)
+                toggle_btn.setText("🔒")
+            else:
+                line_edit.setEchoMode(QLineEdit.EchoMode.Password)
+                toggle_btn.setText("👁")
+                
+        toggle_btn.toggled.connect(on_toggle)
+        
+        layout.addWidget(line_edit)
+        layout.addWidget(toggle_btn)
+        return container, line_edit
 
     def init_ui(self):
         layout = QVBoxLayout()
@@ -620,10 +972,31 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.user_input)
 
         layout.addWidget(QLabel("Password:"))
-        self.pass_input = QLineEdit()
-        self.pass_input.setEchoMode(QLineEdit.EchoMode.Password)
+        pass_container, self.pass_input = self.create_password_field()
         self.pass_input.setText(ConfigManager.get_password(self.user_input.text()))
-        layout.addWidget(self.pass_input)
+        layout.addWidget(pass_container)
+
+        # Forgot Password Button for Settings Window
+        forgot_settings_btn = QPushButton("Forgot Password?")
+        forgot_settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        forgot_settings_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                color: #3da5ff;
+                border: none;
+                font-size: 12px;
+                text-align: left;
+                padding-left: 2px;
+                margin-top: 2px;
+                margin-bottom: 6px;
+            }
+            QPushButton:hover {
+                text-decoration: underline;
+                color: #5bb3ff;
+            }
+        """)
+        forgot_settings_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://hostelwifi.vit.ac.in/index.php?a=add&category=4")))
+        layout.addWidget(forgot_settings_btn)
 
         interval_layout = QHBoxLayout()
         interval_layout.addWidget(QLabel("Check Frequency (seconds):"))
@@ -637,13 +1010,13 @@ class SettingsDialog(QDialog):
         self.startup_cb.setChecked(is_auto_start_enabled())
         layout.addWidget(self.startup_cb)
 
-        self.save_btn = QPushButton("Save & Apply")
+        self.save_btn = QPushButton("Save and Apply")
         self.save_btn.clicked.connect(self.save_settings)
         layout.addWidget(self.save_btn)
 
         layout.addStretch()
         self.setLayout(layout)
-    
+
     def save_settings(self):
         username = self.user_input.text().strip()
         password = self.pass_input.text().strip()
@@ -662,7 +1035,6 @@ class SettingsDialog(QDialog):
 
         QMessageBox.information(self, "Success", "Settings saved successfully!")
         self.accept()
-
 
 # --- SYSTEM TRAY APP ---
 class LoqinTrayApp:
@@ -701,6 +1073,8 @@ class LoqinTrayApp:
 
         self.worker = None
         self.start_monitoring_timer()
+
+        self.force_logout()
         
         # Bandwidth & Speed Meter update timer (1 second interval)
         self.speed_timer = QTimer()
@@ -742,7 +1116,10 @@ class LoqinTrayApp:
 
         self.menu.addSeparator()
 
-        self.menu.addSeparator()
+        self.account_action = QAction("View Account Details", self.menu)
+        self.account_action.setEnabled(False) # Disabled until we get the URL
+        self.account_action.triggered.connect(self.show_account_details)
+        self.menu.addAction(self.account_action)
 
         self.update_action = QAction("Check for Updates", self.menu)
         self.update_action.triggered.connect(self.check_for_updates)
@@ -773,7 +1150,7 @@ class LoqinTrayApp:
         self.menu.addSeparator()
 
         quit_action = QAction("Exit Loqin", self.menu)
-        quit_action.triggered.connect(self.app.quit)
+        quit_action.triggered.connect(self.close_app)
         self.menu.addAction(quit_action)
 
         self.tray.setContextMenu(self.menu)
@@ -790,6 +1167,10 @@ class LoqinTrayApp:
             else:
                 self.pause_action.setText("Pause Loqin")
                 self.tray.setToolTip("Loqin - Active")
+
+    def close_app(self):
+        requests.get('http://phc.prontonetworks.com/cgi-bin/authlogout/')
+        self.app.quit()
 
     def update_bandwidth_meters(self):
         current_net_io = psutil.net_io_counters()
@@ -835,6 +1216,7 @@ class LoqinTrayApp:
         self.config = ConfigManager.load_config()
         self.worker = NetworkWorker(self.config)
         self.worker.status_signal.connect(self.handle_status)
+        self.worker.account_data_signal.connect(self.handle_account_url)
         self.worker.start()
 
     def handle_status(self, message, color_type):
@@ -858,7 +1240,49 @@ class LoqinTrayApp:
         elif color_type == "error":
             self.tray.showMessage("Loqin", message, self.icon, 3000)
 
-    
+    def handle_account_url(self, url):
+        self.current_account_url = url
+        print(url)
+        self.account_action.setEnabled(True)
+
+    def show_account_details(self):
+        if not hasattr(self, 'current_account_url'):
+            return
+            
+        username = self.config.get("username")
+        self.account_dialog = AccountDetailsDialog(username, self.current_account_url)
+        self.account_dialog.show()
+        QApplication.processEvents()
+        
+        try:
+            response = requests.get(self.current_account_url, timeout=5)
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            rows_data = []
+            
+            # 1. Scrape all standard session rows (#DDDDDD and #F3F3F3 backgrounds)
+            session_rows = soup.find_all('tr', attrs={'bgcolor': ['#DDDDDD', '#F3F3F3']})
+            for tr in session_rows:
+                cols = [td.text.strip() for td in tr.find_all('td')]
+                if len(cols) == 7:
+                    rows_data.append(cols)
+            
+            # 2. Scrape Grand Total summary row
+            grand_total_data = []
+            grand_total_label = soup.find(string=lambda text: text and "Grand Total" in text)
+            if grand_total_label:
+                tr = grand_total_label.find_parent('tr')
+                # Extract Usage Time, Upload, Download, Total Data
+                cols = [td.text.strip() for td in tr.find_all('td')]
+                grand_total_data = cols[1:] # Skip label cell
+                
+            # 3. Feed the full table data to the Qt Dialog
+            self.account_dialog.populate_table(rows_data, grand_total_data)
+            
+        except Exception as e:
+            print(f"Failed to scrape account history table: {e}")
+
+
     def check_for_updates(self):
         self.update_action.setText("Checking for updates...")
         self.update_action.setEnabled(False)
@@ -900,25 +1324,23 @@ class LoqinTrayApp:
     def install_update(self, exe_path):
         self.progress_dialog.close()
         
-        # Check if file exists AND is larger than ~1MB (1,000,000 bytes) 
-        # Adjust the size limit if your installer is smaller, but it prevents running empty/text files
-        if not exe_path or not os.path.exists(exe_path) or os.path.getsize(exe_path) < 1000000:
+        # We ensure the downloaded web installer is somewhat valid (> 1MB check removed since web installers are tiny)
+        if not exe_path or not os.path.exists(exe_path):
             QMessageBox.warning(
                 None, 
                 "Update Failed", 
-                "The downloaded update file is corrupted or incomplete. Please download it manually from GitHub."
+                "The update installer could not be found."
             )
             return
             
         try:
-            # os.startfile is the native Windows way to "double-click" a file.
-            # It properly triggers UAC Admin prompts which Inno Setup requires.
+            # os.startfile natively triggers the UAC Admin prompt required by Inno Setup
             if sys.platform == "win32":
                 os.startfile(exe_path)
             else:
                 subprocess.Popen([exe_path])
                 
-            # Exit the current app so the installer can overwrite the files
+            # Exit the current app so the installer can replace it
             self.app.quit()
         except Exception as e:
             QMessageBox.critical(None, "Update Error", f"Failed to launch the installer:\n{str(e)}")
@@ -931,6 +1353,15 @@ class LoqinTrayApp:
         self.timer.timeout.connect(self.trigger_manual_check)
         self.timer.start(self.config.get("interval", 10) * 1000)
         self.trigger_manual_check()
+
+    def force_logout(self):
+        """Silently drops the Pronto Networks Wi-Fi session."""
+        try:
+            # Standard Pronto Network global logout URL
+            requests.get("http://phc.prontonetworks.com/cgi-bin/authlogout", timeout=3)
+            print("Successfully dropped existing Wi-Fi session on startup.")
+        except Exception as e:
+            print(f"Logout check bypassed (likely not connected): {e}")
 
     def run(self):
         sys.exit(self.app.exec())
