@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['production_app.py'],
+    ['minified_app.py'],
     pathex=[],
     binaries=[],
     datas=[('assets', 'assets')],

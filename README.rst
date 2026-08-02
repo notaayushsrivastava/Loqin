@@ -17,7 +17,7 @@ Loqin PC - Automated VIT Hostel Wi-Fi Client
 .. image:: https://img.shields.io/badge/Platform-Windows-lightgrey.svg
 .. image:: https://img.shields.io/badge/Maintained%20by-Aayush%20Srivastava-orange.svg
    :target: https://aayushsrivastava.pythonanywhere.com/
-.. image:: https://img.shields.io/badge/version-1.3.0-blue.svg
+.. image:: https://img.shields.io/badge/version-1.4.0-blue.svg
    :target: https://github.com/notaayushsrivastava/Loqin/releases
 .. image:: https://img.shields.io/badge/License-GPLv3-blue.svg
    :target: LICENSE
@@ -121,8 +121,9 @@ To package the application into a single standalone ``.exe`` file:
 1. Ensure ``loqin_logo_small.png`` is present in the root folder.
 2. Execute PyInstaller:
 
-   .. code-block:: bash
-      pyinstaller --noconsole --onefile --add-data "loqin_logo_small.png;." --icon="loqin_logo_small.png" --version-file="version_info.txt" --name="Loqin" --clean app.py
+   .. code:: bash
+
+      pyinstaller --noconsole --onefile --add-data "assets;assets" --icon="assets/loqin_logo_small.png" --version-file="version_info.txt" --name="Loqin" --clean app.py
 
 3. The output executable will be placed in the ``dist/`` directory.
 

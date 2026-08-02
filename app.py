@@ -10,6 +10,8 @@ import pyqtgraph as pg
 import re
 import ctypes
 import ctypes.wintypes
+import pywifi
+from pywifi import const
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 from PyQt6.QtWidgets import (
@@ -23,11 +25,10 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QIcon, QAction, QPixmap, QColor, QPainter, QDesktopServices
 from PyQt6.QtCore import QThread, pyqtSignal, Qt, QTimer, QUrl, QAbstractNativeEventFilter
 
-
 APP_NAME = "Loqin"
 APPDATA_DIR = os.path.join(os.getenv("APPDATA", os.path.expanduser("~")), "Loqin")
 CONFIG_FILE = os.path.join(APPDATA_DIR, "Loqin_config.json")
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.0"
 GITHUB_API_URL = "https://api.github.com/repos/notaayushsrivastava/loqin/releases/latest"
 
 # --- WINDOWS STARTUP REGISTRY HELPER ---
@@ -156,6 +157,74 @@ class PowerEventFilter(QAbstractNativeEventFilter):
                     
         # Return False, 0 to allow PyQt to continue processing the event normally
         return False, 0
+
+# --- WORKER THREAD: Performance Mode Wi-Fi Selector ---
+class PerformanceModeThread(QThread):
+    status_signal = pyqtSignal(str, str)
+
+    def __init__(self, use_best=True):
+        super().__init__()
+        self.use_best = use_best  # True = Locked to Best BSSID, False = Normal Mode (OS Roaming)
+
+    def run(self):
+        if self.use_best:
+            self.status_signal.emit("Switching to Performance Mode...", "yellow")
+        else:
+            self.status_signal.emit("Switching to Normal Mode...", "yellow")
+        
+        try:
+            wifi = pywifi.PyWiFi()
+            iface = wifi.interfaces()[0]
+            
+            # Start scan and wait for results
+            iface.scan()
+            self.sleep(4) 
+            
+            results = iface.scan_results()
+            target_networks = [n for n in results if "VIT" in (n.ssid or "").upper()]
+            
+            if not target_networks:
+                self.status_signal.emit("No VIT networks found in range.", "error")
+                return
+                
+            # Sort by signal strength to find the best network details
+            target_networks.sort(key=lambda x: x.signal, reverse=True)
+            best_network = target_networks[0]
+            
+            # Disconnect current network
+            iface.disconnect()
+            self.sleep(1)
+            
+            # Create network profile
+            profile = pywifi.Profile()
+            profile.ssid = best_network.ssid
+            
+            # ONLY apply the BSSID lock if Performance Mode is enabled
+            if self.use_best:
+                profile.bssid = best_network.bssid 
+                
+            profile.auth = const.AUTH_ALG_OPEN
+            profile.akm.append(const.AKM_TYPE_NONE)
+            profile.cipher = const.CIPHER_TYPE_NONE
+            
+            # Apply and connect
+            iface.remove_all_network_profiles()
+            tmp_profile = iface.add_network_profile(profile)
+            
+            iface.connect(tmp_profile)
+            self.sleep(4) # Wait for IP assignment
+            
+            if iface.status() == const.IFACE_CONNECTED:
+                # 2. Send the final success notification
+                if self.use_best:
+                    self.status_signal.emit(f"Performance Mode ON", "green")
+                else:
+                    self.status_signal.emit("Normal Mode ON", "green")
+            else:
+                self.status_signal.emit("Failed to connect to the network.", "error")
+                
+        except Exception as e:
+            self.status_signal.emit(f"Wi-Fi Error: {str(e)}", "error")
 
 
 # --- AUTO-UPDATER THREADS ---
@@ -667,6 +736,7 @@ class NetworkWorker(QThread):
                 
             self.status_signal.emit("Portal detected. Authenticating...", "yellow")
             self.login(username, password)
+            return
 
     def toggle_pause(self):
         self.is_paused = not self.is_paused
@@ -1047,11 +1117,14 @@ class LoqinTrayApp:
         self.power_filter = PowerEventFilter(self)
         self.app.installNativeEventFilter(self.power_filter)
 
-        icon_path = resource_path("loqin_logo_small.png")
-        self.icon = QIcon(icon_path)
+        # Load both icons using the resource_path function
+        self.default_icon = QIcon(resource_path("loqin_logo_small.png"))
+        self.perf_icon = QIcon(resource_path("loqin_logo_performance.png")) 
         
+        # Set the default icon on startup
+        self.icon = self.default_icon 
         self.tray = QSystemTrayIcon()
-        self.tray.setIcon(self.icon)
+        self.tray.setIcon(self.default_icon) 
         self.tray.setVisible(True)
         
         # --- FIX 2: Pass self.icon instead of MessageIcon.Information ---
@@ -1074,7 +1147,7 @@ class LoqinTrayApp:
         self.worker = None
         self.start_monitoring_timer()
 
-        self.force_logout()
+        #self.force_logout()
         
         # Bandwidth & Speed Meter update timer (1 second interval)
         self.speed_timer = QTimer()
@@ -1114,7 +1187,14 @@ class LoqinTrayApp:
         self.pause_action.triggered.connect(self.toggle_service_pause)
         self.menu.addAction(self.pause_action)
 
+        self.perf_action = QAction("Performance Mode", self.menu)
+        self.perf_action.setCheckable(True)
+        self.perf_action.setChecked(False) # Set default state
+        self.perf_action.triggered.connect(self.trigger_performance_mode)
+        self.menu.addAction(self.perf_action)   
+
         self.menu.addSeparator()
+
 
         self.account_action = QAction("View Account Details", self.menu)
         self.account_action.setEnabled(False) # Disabled until we get the URL
@@ -1169,7 +1249,26 @@ class LoqinTrayApp:
                 self.tray.setToolTip("Loqin - Active")
 
     def close_app(self):
-        requests.get('http://phc.prontonetworks.com/cgi-bin/authlogout/')
+        # Wrap logout in a try-except with a timeout so it doesn't hang the app closing
+        try:
+            requests.get('http://phc.prontonetworks.com/cgi-bin/authlogout/', timeout=2)
+        except Exception:
+            pass
+            
+        # Nicely shut down threads before quitting 
+        if hasattr(self, 'worker') and self.worker and self.worker.isRunning():
+            self.worker.is_running = False
+            self.worker.quit()
+            self.worker.wait()
+            
+        if hasattr(self, 'perf_thread') and self.perf_thread and self.perf_thread.isRunning():
+            self.perf_thread.quit()
+            self.perf_thread.wait()
+
+        if hasattr(self, 'update_checker') and self.update_checker and self.update_checker.isRunning():
+            self.update_checker.quit()
+            self.update_checker.wait()
+
         self.app.quit()
 
     def update_bandwidth_meters(self):
@@ -1200,19 +1299,46 @@ class LoqinTrayApp:
             self.graph_dialog = SpeedGraphDialog()
         
         if self.graph_dialog.isVisible():
-            self.graph_dialog.hide()
-            self.graph_action.setText("Show Speed Graph")
+            # If it is open but buried behind other windows, bring it to the front
+            if not self.graph_dialog.isActiveWindow():
+                self.graph_dialog.showNormal()
+                self.graph_dialog.raise_()
+                self.graph_dialog.activateWindow()
+                self.graph_action.setText("Hide Speed Graph")
+            else:
+                # If it is already in focus, hide it (normal toggle behavior)
+                self.graph_dialog.hide()
+                self.graph_action.setText("Show Speed Graph")
         else:
-            self.graph_dialog.show()
+            # If it is closed, open and focus it
+            self.graph_dialog.showNormal()
+            self.graph_dialog.raise_()
+            self.graph_dialog.activateWindow()
             self.graph_action.setText("Hide Speed Graph")
 
     def open_settings(self):
-        dialog = SettingsDialog()
-        if dialog.exec():
+        # Check if the settings dialog already exists and is open
+        if hasattr(self, 'settings_dialog') and self.settings_dialog is not None:
+            if self.settings_dialog.isVisible():
+                self.settings_dialog.showNormal()     # Restores if minimized
+                self.settings_dialog.raise_()         # Brings to the front of the screen
+                self.settings_dialog.activateWindow() # Gives it keyboard focus
+                return
+
+        # If not open, create and execute it
+        self.settings_dialog = SettingsDialog()
+        if self.settings_dialog.exec():
             self.config = ConfigManager.load_config()
             self.start_monitoring_timer()
+            
+        # Clean up the reference after the window is closed
+        self.settings_dialog = None
 
     def trigger_manual_check(self):
+        # Prevent overwriting an actively running thread
+        if hasattr(self, 'worker') and self.worker and self.worker.isRunning():
+            return
+            
         self.config = ConfigManager.load_config()
         self.worker = NetworkWorker(self.config)
         self.worker.status_signal.connect(self.handle_status)
@@ -1239,6 +1365,43 @@ class LoqinTrayApp:
             self.tray.showMessage("Loqin", message, self.icon, 3000)
         elif color_type == "error":
             self.tray.showMessage("Loqin", message, self.icon, 3000)
+
+    def trigger_performance_mode(self, checked=False):
+        if hasattr(self, 'perf_thread') and self.perf_thread.isRunning():
+            return
+            
+        if hasattr(self, 'worker') and self.worker:
+            self.worker.is_paused = True
+            self.pause_action.setText("Resume Loqin")
+            self.tray.setToolTip("Loqin - Paused (Optimizing Network)")
+            
+        # Icon swap
+        if checked:
+            self.tray.setIcon(self.perf_icon)
+            self.icon = self.perf_icon  # Updates self.icon so pop-up notifications use it too
+        else:
+            self.tray.setIcon(self.default_icon)
+            self.icon = self.default_icon
+            
+        self.perf_thread = PerformanceModeThread(use_best=checked)
+        self.perf_thread.status_signal.connect(self.handle_perf_status)
+        self.perf_thread.start()
+
+    def handle_perf_status(self, message, color_type):
+        self.status_action.setText(f"Status: {message}")
+        self.status_action.setIcon(create_status_icon(color_type))
+        self.tray.showMessage("Performance Mode", message, self.icon, 4000)
+        
+        # Once connected to the new AP, resume the normal worker so it can authenticate the Captive Portal
+        if color_type == "green" or color_type == "error":
+            if hasattr(self, 'worker') and self.worker:
+                self.worker.is_paused = False
+                self.pause_action.setText("Pause Loqin")
+                self.tray.setToolTip("Loqin - Active")
+                
+            # If successful, trigger an immediate login check
+            if color_type == "green":
+                QTimer.singleShot(1000, self.trigger_manual_check)
 
     def handle_account_url(self, url):
         self.current_account_url = url
@@ -1284,12 +1447,15 @@ class LoqinTrayApp:
 
 
     def check_for_updates(self):
+        # Prevent multiple update threads from running simultaneously
+        if hasattr(self, 'update_checker') and self.update_checker and self.update_checker.isRunning():
+            return
+            
         self.update_action.setText("Checking for updates...")
         self.update_action.setEnabled(False)
         
         self.update_checker = UpdateChecker()
         self.update_checker.update_found.connect(self.prompt_update)
-        # If the thread finishes and no update was found, reset the button text
         self.update_checker.finished.connect(lambda: self.update_action.setText("Check for Updates"))
         self.update_checker.finished.connect(lambda: self.update_action.setEnabled(True))
         self.update_checker.start()
