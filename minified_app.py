@@ -40,7 +40,7 @@ from PyQt6.QtCore import QThread,pyqtSignal,Qt,QTimer,QUrl,QAbstractNativeEventF
 APP_NAME=_D
 APPDATA_DIR=os.path.join(os.getenv('APPDATA',os.path.expanduser('~')),_D)
 CONFIG_FILE=os.path.join(APPDATA_DIR,'Loqin_config.json')
-APP_VERSION='1.4.0'
+APP_VERSION='1.4.2'
 GITHUB_API_URL='https://api.github.com/repos/notaayushsrivastava/loqin/releases/latest'
 REG_PATH='Software\\Microsoft\\Windows\\CurrentVersion\\Run'
 APP_REG_NAME=_D
@@ -259,7 +259,7 @@ class SettingsDialog(QDialog):
 		if not B or not C:QMessageBox.warning(A,'Warning','Username and Password cannot be empty.');return
 		set_auto_start(A.startup_cb.isChecked());A.config[_H]=B;A.config[_M]=A.interval_input.value();ConfigManager.save_config(A.config);ConfigManager.set_password(B,C);QMessageBox.information(A,'Success','Settings saved successfully!');A.accept()
 class LoqinTrayApp:
-	def __init__(A):A.app=QApplication(sys.argv);A.app.setApplicationName(_D);A.app.setQuitOnLastWindowClosed(_B);A.power_filter=PowerEventFilter(A);A.app.installNativeEventFilter(A.power_filter);A.default_icon=QIcon(resource_path(_K));A.perf_icon=QIcon(resource_path('loqin_logo_performance.png'));A.icon=A.default_icon;A.tray=QSystemTrayIcon();A.tray.setIcon(A.default_icon);A.tray.setVisible(_A);A.tray.showMessage(_D,'Loqin has started! Monitoring your connection in the background.',A.icon,3000);A.config=ConfigManager.load_config();A.last_net_io=psutil.net_io_counters();A.last_time=time.time();A.graph_dialog=_C;A.build_menu();A.worker=_C;A.start_monitoring_timer();A.speed_timer=QTimer();A.speed_timer.timeout.connect(A.update_bandwidth_meters);A.speed_timer.start(1000);A.check_for_updates()
+	def __init__(A):A.app=QApplication(sys.argv);A.app.setApplicationName(_D);A.app.setQuitOnLastWindowClosed(_B);A.power_filter=PowerEventFilter(A);A.app.installNativeEventFilter(A.power_filter);A.default_icon=QIcon(resource_path(_K));A.perf_icon=QIcon(resource_path('loqin_logo_performance.png'));A.icon=A.default_icon;A.tray=QSystemTrayIcon();A.tray.setIcon(A.default_icon);A.tray.setVisible(_A);A.tray.showMessage(_D,'Loqin has started! Monitoring your connection in the background.',A.icon,3000);A.config=ConfigManager.load_config();A.last_net_io=psutil.net_io_counters();A.last_time=time.time();A.graph_dialog=_C;A.build_menu();A.worker=_C;A.start_monitoring_timer();A.speed_timer=QTimer();A.speed_timer.timeout.connect(A.update_bandwidth_meters);A.speed_timer.start(1000);A.has_checked_for_updates=_B
 	def build_menu(A):A.menu=QMenu();A.status_action=QAction('Status: Initializing...',A.menu);A.status_action.setIcon(create_status_icon(_J));A.status_action.setEnabled(_A);A.menu.addAction(A.status_action);A.menu.addSeparator();A.speed_action=QAction('Speed: ↓ 0 KB/s  ↑ 0 KB/s',A.menu);A.speed_action.setEnabled(_B);A.menu.addAction(A.speed_action);A.graph_action=QAction(_a,A.menu);A.graph_action.triggered.connect(A.toggle_speed_graph);A.menu.addAction(A.graph_action);A.menu.addSeparator();C=QAction('Connect Now',A.menu);C.triggered.connect(A.trigger_manual_check);A.menu.addAction(C);A.pause_action=QAction(_P,A.menu);A.pause_action.triggered.connect(A.toggle_service_pause);A.menu.addAction(A.pause_action);A.perf_action=QAction(_b,A.menu);A.perf_action.setCheckable(_A);A.perf_action.setChecked(_B);A.perf_action.triggered.connect(A.trigger_performance_mode);A.menu.addAction(A.perf_action);A.menu.addSeparator();A.account_action=QAction('View Account Details',A.menu);A.account_action.setEnabled(_B);A.account_action.triggered.connect(A.show_account_details);A.menu.addAction(A.account_action);A.update_action=QAction(_c,A.menu);A.update_action.triggered.connect(A.check_for_updates);A.menu.addAction(A.update_action);D=QAction('Configure Settings',A.menu);D.triggered.connect(A.open_settings);A.menu.addAction(D);A.menu.addSeparator();B=A.menu.addMenu('Help');E=QAction('How to use',A.menu);E.triggered.connect(lambda:QDesktopServices.openUrl(QUrl('https://github.com/notaayushsrivastava/loqin#readme')));B.addAction(E);F=QAction('GitHub Releases',A.menu);F.triggered.connect(lambda:QDesktopServices.openUrl(QUrl('https://github.com/notaayushsrivastava/loqin/releases')));B.addAction(F);G=QAction('Project Info',A.menu);G.triggered.connect(lambda:QDesktopServices.openUrl(QUrl('https://github.com/notaayushsrivastava/loqin')));B.addAction(G);A.menu.addSeparator();H=QAction('Exit Loqin',A.menu);H.triggered.connect(A.close_app);A.menu.addAction(H);A.tray.setContextMenu(A.menu);A.tray.setToolTip('Loqin PC')
 	def toggle_service_pause(A):
 		if hasattr(A,_F)and A.worker:
@@ -299,7 +299,9 @@ class LoqinTrayApp:
 		if B==_Z:
 			if hasattr(A,_F)and A.worker:A.worker.is_paused=_A;A.pause_action.setText(_Q);A.tray.setToolTip('Loqin - Paused (Missing Credentials)')
 			QTimer.singleShot(100,A.open_settings);return
-		if C==_E and'successfully'in B:A.tray.showMessage(_D,B,A.icon,3000)
+		if C==_E:
+			if'successfully'in B:A.tray.showMessage(_D,B,A.icon,3000)
+			if not getattr(A,'has_checked_for_updates',_B):A.check_for_updates();A.has_checked_for_updates=_A
 		elif C==_G:A.tray.showMessage(_D,B,A.icon,3000)
 	def trigger_performance_mode(A,checked=_B):
 		B=checked

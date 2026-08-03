@@ -17,7 +17,7 @@ Loqin PC - Automated VIT Hostel Wi-Fi Client
 .. image:: https://img.shields.io/badge/Platform-Windows-lightgrey.svg
 .. image:: https://img.shields.io/badge/Maintained%20by-Aayush%20Srivastava-orange.svg
    :target: https://aayushsrivastava.pythonanywhere.com/
-.. image:: https://img.shields.io/badge/version-1.4.0-blue.svg
+.. image:: https://img.shields.io/badge/version-1.4.2-blue.svg
    :target: https://github.com/notaayushsrivastava/Loqin/releases
 .. image:: https://img.shields.io/badge/License-GPLv3-blue.svg
    :target: LICENSE
@@ -66,7 +66,11 @@ Step 3: System Tray Menu Options
 Right-click the Loqin icon in the system tray to open the quick action menu:
 
 * **Status:** Shows current monitoring state.
+* **Show Speed Graph:** Shows a graph monitoring download and upload speed.
 * **Connect Now:** Manually forces an instant connection check and re-authentication attempt.
+* **Pause/Resume Loqin:** Will temporarily stop the worker thread.
+* **Performance Mode:** Will connect to the best BSSID on the network. (This may or may not change your network connectivity).
+* **Account Details:** Shows account details with data transactions, and change password.
 * **Configure Settings:** Opens the configuration window to update credentials, change check frequency (seconds), or toggle startup settings.
 * **Exit Loqin:** Closes the application completely.
 

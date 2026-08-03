@@ -1,7 +1,7 @@
 [Setup]
 AppId={{A2B3C4D5-1234-5678-90AB-CDEF12345678}
 AppName=Loqin
-AppVersion=1.4.0
+AppVersion=1.4.2
 AppPublisher=Aayush Srivastava
 AppCopyright=Copyright (C) 2026 Aayush Srivastava. All rights reserved.
 DefaultDirName={autopf}\Loqin
@@ -29,6 +29,10 @@ Uninstallable=yes
 CreateUninstallRegKey=yes
 UninstallDisplayName=Loqin
 UninstallDisplayIcon={app}\Loqin.exe
+
+[Registry]
+; Disables the Windows automatic captive portal browser popup by forcing the value to 0
+Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Services\NlaSvc\Parameters\Internet"; ValueType: dword; ValueName: "EnableActiveProbing"; ValueData: 0
 
 [Files]
 ; The 'external' flag tells Inno Setup to look for the file on the user's drive (in the {tmp} folder) 

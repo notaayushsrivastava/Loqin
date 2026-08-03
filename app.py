@@ -28,7 +28,7 @@ from PyQt6.QtCore import QThread, pyqtSignal, Qt, QTimer, QUrl, QAbstractNativeE
 APP_NAME = "Loqin"
 APPDATA_DIR = os.path.join(os.getenv("APPDATA", os.path.expanduser("~")), "Loqin")
 CONFIG_FILE = os.path.join(APPDATA_DIR, "Loqin_config.json")
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.4.2"
 GITHUB_API_URL = "https://api.github.com/repos/notaayushsrivastava/loqin/releases/latest"
 
 # --- WINDOWS STARTUP REGISTRY HELPER ---
@@ -1154,7 +1154,7 @@ class LoqinTrayApp:
         self.speed_timer.timeout.connect(self.update_bandwidth_meters)
         self.speed_timer.start(1000)
 
-        self.check_for_updates()
+        self.has_checked_for_updates = False
 
     def build_menu(self):
         self.menu = QMenu()
@@ -1360,9 +1360,16 @@ class LoqinTrayApp:
             QTimer.singleShot(100, self.open_settings)
             return
 
-        # --- FIX 2: Pass self.icon for custom app logo in notifications ---
-        if color_type == "green" and "successfully" in message:
-            self.tray.showMessage("Loqin", message, self.icon, 3000)
+        # --- Trigger Update Check on Successful Connection ---
+        if color_type == "green":
+            if "successfully" in message:
+                self.tray.showMessage("Loqin", message, self.icon, 3000)
+            
+            # Check for updates only once per app session to avoid API rate limits
+            if not getattr(self, 'has_checked_for_updates', False):
+                self.check_for_updates()
+                self.has_checked_for_updates = True
+
         elif color_type == "error":
             self.tray.showMessage("Loqin", message, self.icon, 3000)
 

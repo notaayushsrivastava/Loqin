@@ -1,7 +1,7 @@
 [Setup]
 AppId={{A2B3C4D5-1234-5678-90AB-CDEF12345678}
 AppName=Loqin
-AppVersion=1.4.0
+AppVersion=1.4.2
 AppPublisher=Aayush Srivastava
 AppCopyright=Copyright (C) 2026 Aayush Srivastava. All rights reserved.
 AppPublisherURL=https://github.com/notaayushsrivastava
@@ -54,8 +54,8 @@ Name: "{autodesktop}\Loqin"; Filename: "{app}\Loqin.exe"; Tasks: desktopicon; Ap
 ; Adds Windows auto-start registry key (automatically removed on uninstall via 'uninsdeletevalue')
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Loqin"; ValueData: """{app}\Loqin.exe"""; Tasks: autostart; Flags: uninsdeletevalue
 
-; Disables the Windows automatic captive portal browser popup
-Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Services\NlaSvc\Parameters\Internet"; ValueType: dword; ValueName: "EnableActiveProbing"; ValueData: 0; Flags: createvalueifdoesntexist
+; Disables the Windows automatic captive portal browser popup by forcing the value to 0
+Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Services\NlaSvc\Parameters\Internet"; ValueType: dword; ValueName: "EnableActiveProbing"; ValueData: 0
 
 [Run]
 Filename: "{app}\Loqin.exe"; Description: "{cm:LaunchProgram,Loqin}"; Flags: nowait postinstall skipifsilent
