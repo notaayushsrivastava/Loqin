@@ -28,7 +28,7 @@ from PyQt6.QtCore import QThread, pyqtSignal, Qt, QTimer, QUrl, QAbstractNativeE
 APP_NAME = "Loqin"
 APPDATA_DIR = os.path.join(os.getenv("APPDATA", os.path.expanduser("~")), "Loqin")
 CONFIG_FILE = os.path.join(APPDATA_DIR, "Loqin_config.json")
-APP_VERSION = "1.4.2"
+APP_VERSION = "1.4.3"
 GITHUB_API_URL = "https://api.github.com/repos/notaayushsrivastava/loqin/releases/latest"
 
 # --- WINDOWS STARTUP REGISTRY HELPER ---
@@ -248,7 +248,7 @@ class UpdateChecker(QThread):
                 
                 if latest_v > current_v:
                     # Point directly to the raw file on the master branch
-                    download_url = "https://raw.githubusercontent.com/notaayushsrivastava/Loqin/master/Output/Install_Loqin.exe"
+                    download_url = "https://raw.githubusercontent.com/notaayushsrivastava/Loqin/master/Output/Install_Loqin_Update.exe"
                     
                     self.update_found.emit(
                         latest_version_tag, 

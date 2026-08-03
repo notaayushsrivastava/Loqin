@@ -40,7 +40,7 @@ from PyQt6.QtCore import QThread,pyqtSignal,Qt,QTimer,QUrl,QAbstractNativeEventF
 APP_NAME=_D
 APPDATA_DIR=os.path.join(os.getenv('APPDATA',os.path.expanduser('~')),_D)
 CONFIG_FILE=os.path.join(APPDATA_DIR,'Loqin_config.json')
-APP_VERSION='1.4.2'
+APP_VERSION='1.4.3'
 GITHUB_API_URL='https://api.github.com/repos/notaayushsrivastava/loqin/releases/latest'
 REG_PATH='Software\\Microsoft\\Windows\\CurrentVersion\\Run'
 APP_REG_NAME=_D
@@ -119,7 +119,7 @@ class UpdateChecker(QThread):
 			E={'Accept':'application/vnd.github+json'};A=requests.get(GITHUB_API_URL,timeout=5,headers=E)
 			if A.status_code==200:
 				B=A.json();C=B.get('tag_name','').replace('v','');F=tuple(map(int,APP_VERSION.split('.')));G=tuple(map(int,C.split('.')))
-				if G>F:H='https://raw.githubusercontent.com/notaayushsrivastava/Loqin/master/Output/Install_Loqin.exe';D.update_found.emit(C,H,B.get('body','Bug fixes and improvements.'))
+				if G>F:H='https://raw.githubusercontent.com/notaayushsrivastava/Loqin/master/Output/Install_Loqin_Update.exe';D.update_found.emit(C,H,B.get('body','Bug fixes and improvements.'))
 		except Exception as I:print(f"Update check failed: {I}")
 class AccountDetailsDialog(QDialog):
 	def __init__(A,username,account_url,parent=_C):super().__init__(parent);A.username=username;A.account_url=account_url;A.setWindowTitle('Loqin • Account Management');A.setWindowIcon(QIcon(resource_path(_K)));A.resize(750,450);A.setStyleSheet('\n            QDialog { \n                background-color: #171A22; \n            }\n            QLabel {\n                color: #FFFFFF;\n                font-size: 14px;\n            }\n            /* Table Styling */\n            QTableWidget {\n                background-color: #1E222D;\n                color: #DDDDDD;\n                gridline-color: #2C313E;\n                border: 1px solid #2C313E;\n                border-radius: 8px;\n                font-size: 12px;\n            }\n            QHeaderView::section {\n                background-color: #171A22;\n                color: #3da5ff;\n                font-weight: bold;\n                padding: 6px;\n                border: 1px solid #2C313E;\n            }\n            QTableWidget::item { padding: 4px; }\n            \n            /* Tab Styling */\n            QTabWidget::pane { border: 1px solid #2C313E; border-radius: 4px; }\n            QTabBar::tab {\n                background: #1E222D; color: #BBBBBB; padding: 10px 20px; \n                border: 1px solid #2C313E; border-bottom: none; \n                border-top-left-radius: 4px; border-top-right-radius: 4px;\n            }\n            QTabBar::tab:selected { background: #171A22; color: #3da5ff; font-weight: bold; }\n            \n            /* Form Styling */\n            QLineEdit {\n                background: #1E222D; color: #FFF; border: 1px solid #2C313E; \n                border-radius: 4px; padding: 6px; font-size: 14px;\n            }\n            QPushButton {\n                background: #3da5ff; color: #171A22; font-weight: bold; \n                border-radius: 4px; padding: 8px; font-size: 14px;\n            }\n            QPushButton:hover { background: #2b8ee0; }\n        ');B=QVBoxLayout(A);A.tabs=QTabWidget(A);B.addWidget(A.tabs);A.setup_history_tab();A.setup_password_tab()
