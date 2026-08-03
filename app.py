@@ -22,13 +22,13 @@ from PyQt6.QtWidgets import (
     QHeaderView, QTableWidgetItem, QAbstractItemView, QTabWidget,
     QWidget, QFormLayout
 )
-from PyQt6.QtGui import QIcon, QAction, QPixmap, QColor, QPainter, QDesktopServices
+from PyQt6.QtGui import QIcon, QAction, QPixmap, QColor, QPainter, QDesktopServices, QCursor
 from PyQt6.QtCore import QThread, pyqtSignal, Qt, QTimer, QUrl, QAbstractNativeEventFilter
 
 APP_NAME = "Loqin"
 APPDATA_DIR = os.path.join(os.getenv("APPDATA", os.path.expanduser("~")), "Loqin")
 CONFIG_FILE = os.path.join(APPDATA_DIR, "Loqin_config.json")
-APP_VERSION = "1.4.3"
+APP_VERSION = "1.4.4"
 GITHUB_API_URL = "https://api.github.com/repos/notaayushsrivastava/loqin/releases/latest"
 
 # --- WINDOWS STARTUP REGISTRY HELPER ---
@@ -164,13 +164,11 @@ class PerformanceModeThread(QThread):
 
     def __init__(self, use_best=True):
         super().__init__()
-        self.use_best = use_best  # True = Locked to Best BSSID, False = Normal Mode (OS Roaming)
+        self.use_best = use_best  
 
     def run(self):
-        if self.use_best:
-            self.status_signal.emit("Switching to Performance Mode...", "yellow")
-        else:
-            self.status_signal.emit("Switching to Normal Mode...", "yellow")
+        status_msg = "Optimizing Network..." if self.use_best else "Reverting Network..."
+        self.status_signal.emit(status_msg, "yellow")
         
         try:
             wifi = pywifi.PyWiFi()
@@ -187,41 +185,56 @@ class PerformanceModeThread(QThread):
                 self.status_signal.emit("No VIT networks found in range.", "error")
                 return
                 
-            # Sort by signal strength to find the best network details
-            target_networks.sort(key=lambda x: x.signal, reverse=True)
-            best_network = target_networks[0]
+            # Sort by signal strength:
+            # - reverse=True  -> Strongest signal first (Performance Mode ON)
+            # - reverse=False -> Weakest signal first (Performance Mode OFF)
+            target_networks.sort(key=lambda x: x.signal, reverse=self.use_best)
+            selected_network = target_networks[0]
             
-            # Disconnect current network
-            iface.disconnect()
-            self.sleep(1)
-            
-            # Create network profile
-            profile = pywifi.Profile()
-            profile.ssid = best_network.ssid
-            
-            # ONLY apply the BSSID lock if Performance Mode is enabled
-            if self.use_best:
-                profile.bssid = best_network.bssid 
+            # When Performance Mode is turned OFF, force connection to the poorer BSSID
+            if not self.use_best:
+                iface.disconnect()
+                self.sleep(1)
                 
-            profile.auth = const.AUTH_ALG_OPEN
-            profile.akm.append(const.AKM_TYPE_NONE)
-            profile.cipher = const.CIPHER_TYPE_NONE
+                # Create profile bound to the weaker BSSID
+                profile = pywifi.Profile()
+                profile.ssid = selected_network.ssid
+                profile.bssid = selected_network.bssid
+                profile.auth = const.AUTH_ALG_OPEN
+                profile.akm.append(const.AKM_TYPE_NONE)
+                
+                iface.remove_all_network_profiles()
+                tmp_profile = iface.add_network_profile(profile)
+                iface.connect(tmp_profile)
+                
+                self.sleep(3)  # Allow time for connection to switch
+                self.status_signal.emit("Performance Mode OFF", "green")
+                return
+
+            # --- Performance Mode ON Logic ---
+            # Get current BSSID using Windows netsh
+            current_bssid = None
+            try:
+                output = subprocess.check_output(
+                    ["netsh", "wlan", "show", "interfaces"], 
+                    creationflags=0x08000000
+                ).decode("utf-8", errors="ignore")
+                
+                for line in output.split('\n'):
+                    if "BSSID" in line and "BSSID" == line.split(":")[0].strip():
+                        parts = line.split(":")
+                        if len(parts) >= 4:
+                            current_bssid = ":".join(parts[1:]).strip().lower().replace("-", ":")
+                            break
+            except Exception as e:
+                print(f"Could not get current BSSID: {e}")
+                
+            best_bssid = selected_network.bssid.strip().lower().replace("-", ":") if selected_network.bssid else ""
             
-            # Apply and connect
-            iface.remove_all_network_profiles()
-            tmp_profile = iface.add_network_profile(profile)
-            
-            iface.connect(tmp_profile)
-            self.sleep(4) # Wait for IP assignment
-            
-            if iface.status() == const.IFACE_CONNECTED:
-                # 2. Send the final success notification
-                if self.use_best:
-                    self.status_signal.emit(f"Performance Mode ON", "green")
-                else:
-                    self.status_signal.emit("Normal Mode ON", "green")
+            if current_bssid and current_bssid == best_bssid:
+                self.status_signal.emit("Performance Mode ON", "green")
             else:
-                self.status_signal.emit("Failed to connect to the network.", "error")
+                self.status_signal.emit("Performance Mode ON", "yellow")
                 
         except Exception as e:
             self.status_signal.emit(f"Wi-Fi Error: {str(e)}", "error")
@@ -230,10 +243,10 @@ class PerformanceModeThread(QThread):
 # --- AUTO-UPDATER THREADS ---
 class UpdateChecker(QThread):
     update_found = pyqtSignal(str, str, str)
+    no_update_found = pyqtSignal() # New signal for up-to-date status
 
     def run(self):
         try:
-            # No token needed for public repositories!
             headers = {
                 "Accept": "application/vnd.github+json"
             }
@@ -247,7 +260,6 @@ class UpdateChecker(QThread):
                 latest_v = tuple(map(int, latest_version_tag.split('.')))
                 
                 if latest_v > current_v:
-                    # Point directly to the raw file on the master branch
                     download_url = "https://raw.githubusercontent.com/notaayushsrivastava/Loqin/master/Output/Install_Loqin_Update.exe"
                     
                     self.update_found.emit(
@@ -255,6 +267,9 @@ class UpdateChecker(QThread):
                         download_url, 
                         data.get("body", "Bug fixes and improvements.")
                     )
+                else:
+                    # Emit signal if no newer version is found
+                    self.no_update_found.emit()
         except Exception as e:
             print(f"Update check failed: {e}")
 
@@ -1147,7 +1162,7 @@ class LoqinTrayApp:
         self.worker = None
         self.start_monitoring_timer()
 
-        #self.force_logout()
+        self.force_logout()
         
         # Bandwidth & Speed Meter update timer (1 second interval)
         self.speed_timer = QTimer()
@@ -1234,7 +1249,17 @@ class LoqinTrayApp:
         self.menu.addAction(quit_action)
 
         self.tray.setContextMenu(self.menu)
+        self.tray.activated.connect(self.on_tray_icon_activated)
         self.tray.setToolTip("Loqin PC")
+
+    def on_tray_icon_activated(self, reason):
+        """Handles clicks on the system tray icon."""
+        # QSystemTrayIcon.Trigger represents a standard left-click
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            # Display the menu at the current mouse position
+            menu = self.tray.contextMenu()
+            if menu is not None:
+                menu.exec(QCursor.pos())
 
     def toggle_service_pause(self):
         # Ensure the worker actually exists before trying to pause it
@@ -1367,7 +1392,7 @@ class LoqinTrayApp:
             
             # Check for updates only once per app session to avoid API rate limits
             if not getattr(self, 'has_checked_for_updates', False):
-                self.check_for_updates()
+                self.check_for_updates(True)
                 self.has_checked_for_updates = True
 
         elif color_type == "error":
@@ -1399,15 +1424,21 @@ class LoqinTrayApp:
         self.status_action.setIcon(create_status_icon(color_type))
         self.tray.showMessage("Performance Mode", message, self.icon, 4000)
         
-        # Once connected to the new AP, resume the normal worker so it can authenticate the Captive Portal
-        if color_type == "green" or color_type == "error":
+        # We only want to unpause the app and update UI when the final message is emitted,
+        # skipping the initial "Optimizing Network..." status.
+        if message != "Optimizing Network...":
             if hasattr(self, 'worker') and self.worker:
                 self.worker.is_paused = False
                 self.pause_action.setText("Pause Loqin")
-                self.tray.setToolTip("Loqin - Active")
                 
-            # If successful, trigger an immediate login check
-            if color_type == "green":
+                # Update tooltip to reflect the new state accurately
+                if "OFF" in message:
+                    self.tray.setToolTip("Loqin - Active")
+                else:
+                    self.tray.setToolTip("Loqin - Active (Performance Mode)")
+                
+            # Trigger an immediate login check for both success (green) and warning (yellow) states
+            if color_type in ["green", "yellow"]:
                 QTimer.singleShot(1000, self.trigger_manual_check)
 
     def handle_account_url(self, url):
@@ -1453,19 +1484,37 @@ class LoqinTrayApp:
             print(f"Failed to scrape account history table: {e}")
 
 
-    def check_for_updates(self):
+    def check_for_updates(self, silent=False):
+        """
+        Checks for updates on GitHub.
+        :param silent: If True, suppresses the 'Up to Date' dialog when no new updates are found.
+        """
         # Prevent multiple update threads from running simultaneously
         if hasattr(self, 'update_checker') and self.update_checker and self.update_checker.isRunning():
             return
             
-        self.update_action.setText("Checking for updates...")
-        self.update_action.setEnabled(False)
+        if not silent:
+            self.update_action.setText("Checking for updates...")
+            self.update_action.setEnabled(False)
         
         self.update_checker = UpdateChecker()
         self.update_checker.update_found.connect(self.prompt_update)
-        self.update_checker.finished.connect(lambda: self.update_action.setText("Check for Updates"))
-        self.update_checker.finished.connect(lambda: self.update_action.setEnabled(True))
+        
+        # Only show the "Up to Date" popup if triggered manually (not on startup)
+        if not silent:
+            self.update_checker.no_update_found.connect(self.prompt_no_update) 
+            self.update_checker.finished.connect(lambda: self.update_action.setText("Check for Updates"))
+            self.update_checker.finished.connect(lambda: self.update_action.setEnabled(True))
+            
         self.update_checker.start()
+
+    def prompt_no_update(self):
+        """Displays a GUI dialog when the app is already on the latest version."""
+        QMessageBox.information(
+            None,
+            "Up to Date",
+            f"You are already running the latest version of Loqin (v{APP_VERSION}).\nNo new updates were found :P"
+        )
 
     def prompt_update(self, version, url, notes):
         if hasattr(self, 'progress_dialog') and self.progress_dialog.isVisible():
