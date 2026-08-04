@@ -28,7 +28,7 @@ from PyQt6.QtCore import QThread, pyqtSignal, Qt, QTimer, QUrl, QAbstractNativeE
 APP_NAME = "Loqin"
 APPDATA_DIR = os.path.join(os.getenv("APPDATA", os.path.expanduser("~")), "Loqin")
 CONFIG_FILE = os.path.join(APPDATA_DIR, "Loqin_config.json")
-APP_VERSION = "1.4.4"
+APP_VERSION = "1.4.5"
 GITHUB_API_URL = "https://api.github.com/repos/notaayushsrivastava/loqin/releases/latest"
 
 # --- WINDOWS STARTUP REGISTRY HELPER ---
@@ -149,6 +149,9 @@ class PowerEventFilter(QAbstractNativeEventFilter):
                 # Safely set the worker to paused using the existing attribute
                 if hasattr(self.tray_app, 'worker') and self.tray_app.worker:
                     self.tray_app.worker.is_paused = True
+
+                # Drop the Wi-Fi session so the user can use their phone
+                self.tray_app.force_logout()
                     
             elif msg.wParam == PBT_APMRESUMEAUTOMATIC:
                 # Safely resume the worker
@@ -856,6 +859,11 @@ class SpeedGraphDialog(QDialog):
         """)
         self.pin_checkbox.toggled.connect(self.toggle_always_on_top)
 
+        # --- NYAN CAT EASTER EGG TRACKERS ---
+        self.secret_code = "nyan"
+        self.code_index = 0
+        self.nyan_mode = False
+
         # Centers the title while pushing the pin checkbox to the far right
         header_layout.addStretch()
         header_layout.addWidget(title)
@@ -937,6 +945,72 @@ class SpeedGraphDialog(QDialog):
         legend.setBrush(pg.mkBrush(30, 30, 30, 200))
 
         legend.setOffset((15, 15))
+
+    def keyPressEvent(self, event):
+        char = event.text().lower()
+        if char == self.secret_code[self.code_index]:
+            self.code_index += 1
+            if self.code_index == len(self.secret_code):
+                self.toggle_nyan_mode()
+                self.code_index = 0
+        else:
+            self.code_index = 0
+            
+        super().keyPressEvent(event)
+
+    def generate_nyan_cursor(self):
+        pixmap = QPixmap(32, 32)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+
+        # 1. Rainbow Trail (left side)
+        rainbow_colors = ["#FF0000", "#FF7F00", "#FFFF00", "#00FF00", "#0099FF", "#8B00FF"]
+        for i, color in enumerate(rainbow_colors):
+            painter.fillRect(0, 10 + (i * 2), 12, 2, QColor(color))
+
+        # 2. Pop-Tart Body (center)
+        painter.fillRect(12, 9, 14, 14, QColor("#FFD1DC"))  # Biscuit Crust
+        painter.fillRect(13, 10, 12, 12, QColor("#FF69B4")) # Pink Frosting
+        # Frosting Sprinkles
+        painter.fillRect(15, 12, 2, 2, QColor("#FF007F"))
+        painter.fillRect(20, 15, 2, 2, QColor("#FF007F"))
+        painter.fillRect(16, 18, 2, 2, QColor("#FF007F"))
+
+        # 3. Cat Head & Ears (right side)
+        painter.fillRect(22, 13, 9, 8, QColor("#999999"))   # Head Base
+        painter.fillRect(23, 10, 2, 3, QColor("#999999"))   # Left Ear
+        painter.fillRect(28, 10, 2, 3, QColor("#999999"))   # Right Ear
+        painter.fillRect(24, 15, 2, 2, QColor("#000000"))   # Left Eye
+        painter.fillRect(28, 15, 2, 2, QColor("#000000"))   # Right Eye
+        painter.fillRect(26, 18, 2, 1, QColor("#FFB6C1"))   # Cheek
+
+        painter.end()
+        # Set hotspot near the cat's nose
+        return QCursor(pixmap, 26, 15)
+
+    def toggle_nyan_mode(self):
+        self.nyan_mode = not self.nyan_mode
+        
+        if self.nyan_mode:
+            self.setWindowTitle("Loqin • Nyan Cat Mode!")
+            self.setCursor(self.generate_nyan_cursor())
+            self.graph.setBackground("#0F051D") # Deep space background
+            self.download_curve.setPen(pg.mkPen("#FF69B4", width=3)) # Hot pink
+            self.upload_curve.setPen(pg.mkPen("#00FFFF", width=3))   # Electric cyan
+            self.stats.setStyleSheet("""
+                QLabel{ color:#FFD1DC; font-size:13px; font-weight: bold; }
+            """)
+        else:
+            self.setWindowTitle("Loqin • Live Network Monitor")
+            self.unsetCursor() # Reverts back to standard Windows cursor
+            self.graph.setBackground("#171A22")
+            self.download_curve.setPen(pg.mkPen("#3da5ff", width=3))
+            self.upload_curve.setPen(pg.mkPen("#2ecc71", width=3))
+            self.stats.setStyleSheet("""
+                QLabel{ color:#cccccc; font-size:13px; }
+            """)
+    
 
     def toggle_always_on_top(self, checked):
         was_visible = self.isVisible()
@@ -1322,20 +1396,22 @@ class LoqinTrayApp:
     def toggle_speed_graph(self):
         if not self.graph_dialog:
             self.graph_dialog = SpeedGraphDialog()
+            # Reset menu action text whenever the dialog is closed manually
+            self.graph_dialog.finished.connect(lambda: self.graph_action.setText("Show Speed Graph"))
         
         if self.graph_dialog.isVisible():
-            # If it is open but buried behind other windows, bring it to the front
+            # If open but buried behind other windows, bring it to the front
             if not self.graph_dialog.isActiveWindow():
                 self.graph_dialog.showNormal()
                 self.graph_dialog.raise_()
                 self.graph_dialog.activateWindow()
                 self.graph_action.setText("Hide Speed Graph")
             else:
-                # If it is already in focus, hide it (normal toggle behavior)
+                # If already in focus, hide it
                 self.graph_dialog.hide()
                 self.graph_action.setText("Show Speed Graph")
         else:
-            # If it is closed, open and focus it
+            # If closed or hidden, open and focus it
             self.graph_dialog.showNormal()
             self.graph_dialog.raise_()
             self.graph_dialog.activateWindow()

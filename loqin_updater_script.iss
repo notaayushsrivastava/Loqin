@@ -1,7 +1,7 @@
 [Setup]
 AppId={{A2B3C4D5-1234-5678-90AB-CDEF12345678}
 AppName=Loqin
-AppVersion=1.4.4
+AppVersion=1.4.5
 AppPublisher=Aayush Srivastava
 AppCopyright=Copyright (C) 2026 Aayush Srivastava. All rights reserved.
 DefaultDirName={autopf}\Loqin
@@ -41,8 +41,9 @@ Source: "{tmp}\Loqin.exe"; DestDir: "{app}"; Flags: external ignoreversion
 Source: "assets\loqin_logo_small.png"; DestDir: "{app}"; Flags: ignoreversion
 
 [Run]
-; Auto-relaunch Loqin quietly after installation completes[cite: 5]
-Filename: "{app}\Loqin.exe"; Description: "{cm:LaunchProgram,Loqin}"; Flags: nowait postinstall skipifsilent
+; Auto-relaunch Loqin quietly after installation completes
+; Added 'runasoriginaluser' to prevent Admin %TEMP% conflicts and 'shellexec' to let the OS handle the launch safely
+Filename: "{app}\Loqin.exe"; Description: "{cm:LaunchProgram,Loqin}"; Flags: nowait postinstall skipifsilent runasoriginaluser shellexec
 
 [Code]
 var
