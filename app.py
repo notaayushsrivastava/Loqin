@@ -28,7 +28,7 @@ from PyQt6.QtCore import QThread, pyqtSignal, Qt, QTimer, QUrl, QAbstractNativeE
 APP_NAME = "Loqin"
 APPDATA_DIR = os.path.join(os.getenv("APPDATA", os.path.expanduser("~")), "Loqin")
 CONFIG_FILE = os.path.join(APPDATA_DIR, "Loqin_config.json")
-APP_VERSION = "1.4.5"
+APP_VERSION = "1.5.0"
 GITHUB_API_URL = "https://api.github.com/repos/notaayushsrivastava/loqin/releases/latest"
 
 # --- WINDOWS STARTUP REGISTRY HELPER ---
@@ -136,30 +136,41 @@ class PowerEventFilter(QAbstractNativeEventFilter):
     def __init__(self, tray_app):
         super().__init__()
         self.tray_app = tray_app
+        self.last_event_time = 0
+        self.last_wparam = None
 
     def nativeEventFilter(self, eventType, message):
         """Intercept native Windows messages to detect sleep/wake"""
-        
-        # message is a memory address pointing to the Windows MSG structure.
-        # We use ctypes.wintypes to extract the data.
         msg = ctypes.wintypes.MSG.from_address(int(message))
         
         if msg.message == WM_POWERBROADCAST:
+            current_time = time.time()
+            
+            # --- FIX: Debounce duplicate power messages delivered across multiple window handles ---
+            if msg.wParam == self.last_wparam and (current_time - self.last_event_time) < 2.0:
+                return False, 0
+                
+            self.last_event_time = current_time
+            self.last_wparam = msg.wParam
+
             if msg.wParam == PBT_APMSUSPEND:
-                # Safely set the worker to paused using the existing attribute
                 if hasattr(self.tray_app, 'worker') and self.tray_app.worker:
                     self.tray_app.worker.is_paused = True
-
-                # Drop the Wi-Fi session so the user can use their phone
                 self.tray_app.force_logout()
                     
             elif msg.wParam == PBT_APMRESUMEAUTOMATIC:
-                # Safely resume the worker
                 if hasattr(self.tray_app, 'worker') and self.tray_app.worker:
                     self.tray_app.worker.is_paused = False
+                
+                # --- FIX: Reset update flag so UpdateChecker waits for active Wi-Fi ---
+                self.tray_app.has_checked_for_updates = False
+                
+                # --- Run Performance Thread on wake (only if turned on) ---
+                if hasattr(self.tray_app, 'perf_action') and self.tray_app.perf_action.isChecked():
+                    self.tray_app.trigger_performance_mode(checked=True)
                     
-        # Return False, 0 to allow PyQt to continue processing the event normally
         return False, 0
+
 
 # --- WORKER THREAD: Performance Mode Wi-Fi Selector ---
 class PerformanceModeThread(QThread):
@@ -246,35 +257,51 @@ class PerformanceModeThread(QThread):
 # --- AUTO-UPDATER THREADS ---
 class UpdateChecker(QThread):
     update_found = pyqtSignal(str, str, str)
-    no_update_found = pyqtSignal() # New signal for up-to-date status
+    no_update_found = pyqtSignal()
 
     def run(self):
-        try:
-            headers = {
-                "Accept": "application/vnd.github+json"
-            }
-            res = requests.get(GITHUB_API_URL, timeout=5, headers=headers)
-            
-            if res.status_code == 200:
-                data = res.json()
-                latest_version_tag = data.get("tag_name", "").replace("v", "")
+        max_retries = 5
+        retry_delay = 5  # Wait 5 seconds between attempts
+        
+        for attempt in range(max_retries):
+            print(f"Checking for updates (Attempt {attempt + 1}/{max_retries})...")
+            try:
+                headers = {
+                    "Accept": "application/vnd.github+json"
+                }
+                res = requests.get(GITHUB_API_URL, timeout=5, headers=headers)
                 
-                current_v = tuple(map(int, APP_VERSION.split('.')))
-                latest_v = tuple(map(int, latest_version_tag.split('.')))
-                
-                if latest_v > current_v:
-                    download_url = "https://raw.githubusercontent.com/notaayushsrivastava/Loqin/master/Output/Install_Loqin_Update.exe"
+                if res.status_code == 200:
+                    data = res.json()
+                    latest_version_tag = data.get("tag_name", "").replace("v", "")
                     
-                    self.update_found.emit(
-                        latest_version_tag, 
-                        download_url, 
-                        data.get("body", "Bug fixes and improvements.")
-                    )
-                else:
-                    # Emit signal if no newer version is found
-                    self.no_update_found.emit()
-        except Exception as e:
-            print(f"Update check failed: {e}")
+                    current_v = tuple(map(int, APP_VERSION.split('.')))
+                    latest_v = tuple(map(int, latest_version_tag.split('.')))
+                    
+                    if latest_v > current_v:
+                        download_url = "https://raw.githubusercontent.com/notaayushsrivastava/Loqin/master/Output/Install_Loqin_Update.exe"
+                        
+                        self.update_found.emit(
+                            latest_version_tag, 
+                            download_url, 
+                            data.get("body", "Bug fixes and improvements.")
+                        )
+                    else:
+                        self.no_update_found.emit()
+                        
+                    # Exit the thread successfully
+                    return 
+                    
+            except requests.exceptions.SSLError:
+                print(f"HTTPS intercepted by captive portal. Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+                
+            except Exception as e:
+                print(f"Update check failed due to network error: {e}")
+                # For non-SSL errors (like no connection at all), abort entirely
+                return 
+                
+        print("Update check aborted: Captive portal is persistently intercepting HTTPS traffic.")
 
 class AccountDetailsDialog(QDialog):
     # Notice we now pass username and account_url into the dialog
@@ -605,11 +632,11 @@ class ReleaseNotesDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
-        # 1. Header Text Widget
+        # Header Text Widget
         header_label = QLabel(f"<h3>A new version ({version}) of Loqin is available!</h3>")
         layout.addWidget(header_label)
 
-        # 2. Release Notes Display
+        # Release Notes Display
         self.text_browser = QTextBrowser()
         self.text_browser.setOpenExternalLinks(True)
         
@@ -618,7 +645,7 @@ class ReleaseNotesDialog(QDialog):
         self.text_browser.setMarkdown(markdown_content)
         layout.addWidget(self.text_browser)
 
-        # 3. Action Buttons
+        # Action Buttons
         button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Yes | QDialogButtonBox.StandardButton.No
         )
@@ -1202,7 +1229,7 @@ class LoqinTrayApp:
         self.app.setApplicationName("Loqin")
         self.app.setQuitOnLastWindowClosed(False)
 
-        # --- NEW: Install the Power Event Filter ---
+        # --- Install the Power Event Filter ---
         self.power_filter = PowerEventFilter(self)
         self.app.installNativeEventFilter(self.power_filter)
 
@@ -1311,8 +1338,8 @@ class LoqinTrayApp:
         releases_action.triggered.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/notaayushsrivastava/loqin/releases")))
         help_menu.addAction(releases_action)
 
-        info_action = QAction("Project Info", self.menu)
-        info_action.triggered.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/notaayushsrivastava/loqin")))
+        info_action = QAction("Bug Report", self.menu)
+        info_action.triggered.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/notaayushsrivastava/loqin/issues")))
         help_menu.addAction(info_action)
         # ---------------------------------------------- #
 
@@ -1440,6 +1467,41 @@ class LoqinTrayApp:
         if hasattr(self, 'worker') and self.worker and self.worker.isRunning():
             return
             
+        # --- NEW: Detect New Wi-Fi (BSSID Change) ---
+        current_bssid = None
+        try:
+            output = subprocess.check_output(
+                ["netsh", "wlan", "show", "interfaces"], 
+                creationflags=0x08000000
+            ).decode("utf-8", errors="ignore")
+            
+            for line in output.split('\n'):
+                if "BSSID" in line and "BSSID" == line.split(":")[0].strip():
+                    parts = line.split(":")
+                    if len(parts) >= 4:
+                        current_bssid = ":".join(parts[1:]).strip().lower().replace("-", ":")
+                        break
+        except Exception:
+            pass
+
+        if not hasattr(self, 'last_bssid'):
+            self.last_bssid = current_bssid
+
+        # If a new Wi-Fi connection is detected and Performance Mode is ON
+        if current_bssid and current_bssid != self.last_bssid:
+            self.last_bssid = current_bssid
+            if self.perf_action.isChecked():
+                # Avoid infinite optimization loops if the thread itself changed the BSSID
+                if getattr(self, 'just_optimized', False):
+                    self.just_optimized = False
+                else:
+                    self.trigger_performance_mode(checked=True)
+                    return  # Skip standard worker; Performance Mode handles it
+        
+        self.last_bssid = current_bssid
+        self.just_optimized = False # Ensure the flag resets
+        # --------------------------------------------
+            
         self.config = ConfigManager.load_config()
         self.worker = NetworkWorker(self.config)
         self.worker.status_signal.connect(self.handle_status)
@@ -1450,7 +1512,6 @@ class LoqinTrayApp:
         self.status_action.setText(f"Status: {message}")
         self.status_action.setIcon(create_status_icon(color_type))
         
-        # --- FIX 1: Intercept missing credentials, pause thread, open settings ---
         if message == "Missing credentials":
             if hasattr(self, 'worker') and self.worker:
                 self.worker.is_paused = True
@@ -1468,8 +1529,10 @@ class LoqinTrayApp:
             
             # Check for updates only once per app session to avoid API rate limits
             if not getattr(self, 'has_checked_for_updates', False):
-                self.check_for_updates(True)
                 self.has_checked_for_updates = True
+                # FIX: Wait 3.5 seconds before checking updates to let the 
+                # captive portal firewall fully open up HTTPS traffic.
+                QTimer.singleShot(3500, lambda: self.check_for_updates(True))
 
         elif color_type == "error":
             self.tray.showMessage("Loqin", message, self.icon, 3000)
@@ -1500,20 +1563,19 @@ class LoqinTrayApp:
         self.status_action.setIcon(create_status_icon(color_type))
         self.tray.showMessage("Performance Mode", message, self.icon, 4000)
         
-        # We only want to unpause the app and update UI when the final message is emitted,
-        # skipping the initial "Optimizing Network..." status.
         if message != "Optimizing Network...":
+            # --- NEW: Set flag so we don't infinitely loop BSSID changes ---
+            self.just_optimized = True
+            
             if hasattr(self, 'worker') and self.worker:
                 self.worker.is_paused = False
                 self.pause_action.setText("Pause Loqin")
                 
-                # Update tooltip to reflect the new state accurately
                 if "OFF" in message:
                     self.tray.setToolTip("Loqin - Active")
                 else:
                     self.tray.setToolTip("Loqin - Active (Performance Mode)")
                 
-            # Trigger an immediate login check for both success (green) and warning (yellow) states
             if color_type in ["green", "yellow"]:
                 QTimer.singleShot(1000, self.trigger_manual_check)
 
@@ -1657,7 +1719,7 @@ class LoqinTrayApp:
         try:
             # Standard Pronto Network global logout URL
             requests.get("http://phc.prontonetworks.com/cgi-bin/authlogout", timeout=3)
-            print("Successfully dropped existing Wi-Fi session on startup.")
+            print("Successfully dropped existing Wi-Fi session.")
         except Exception as e:
             print(f"Logout check bypassed (likely not connected): {e}")
 

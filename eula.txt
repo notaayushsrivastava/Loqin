@@ -1,0 +1,11 @@
+END USER LICENSE AGREEMENT (EULA) for Loqin
+
+By installing, copying, or otherwise using Loqin, you agree to be bound by the terms of this EULA.
+
+1. GNU GENERAL PUBLIC LICENSE (GPLv3)
+This software is licensed under the GNU General Public License Version 3 (GPLv3). You may redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation. A full copy of the GPLv3 can be found at: https://www.gnu.org/licenses/gpl-3.0.html
+
+2. DEVELOPER SAFEGUARD & LIMITATION OF LIABILITY
+The decision to download, install, and use this application is entirely your own. The developer, Aayush Srivastava, provides this software "as-is" and is not responsible for any damage, data loss, network policy violations, or other issues that may have been caused by the use or misuse of this software. 
+
+THERE IS NO WARRANTY FOR THE PROGRAM, TO THE EXTENT PERMITTED BY APPLICABLE LAW. THE ENTIRE RISK AS TO THE QUALITY AND PERFORMANCE OF THE PROGRAM IS WITH YOU. SHOULD THE PROGRAM PROVE DEFECTIVE, YOU ASSUME THE COST OF ALL NECESSARY SERVICING, REPAIR, OR CORRECTION.

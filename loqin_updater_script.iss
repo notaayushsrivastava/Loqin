@@ -1,7 +1,7 @@
 [Setup]
 AppId={{A2B3C4D5-1234-5678-90AB-CDEF12345678}
 AppName=Loqin
-AppVersion=1.4.5
+AppVersion=1.5.0
 AppPublisher=Aayush Srivastava
 AppCopyright=Copyright (C) 2026 Aayush Srivastava. All rights reserved.
 DefaultDirName={autopf}\Loqin
@@ -12,19 +12,22 @@ SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=admin
 
+; --- EULA CONFIGURATION ---
+LicenseFile=eula.txt
+
 ; --- BRANDING & LOGOS ---
 SetupIconFile=assets/loqin_icon.ico
 WizardImageFile=assets/wizard_banner.bmp
 WizardSmallImageFile=assets/wizard_logo.bmp
 
-; Disable unnecessary wizard pages for silent/quick updates[cite: 5]
+; Disable unnecessary wizard pages for silent/quick updates
 DisableWelcomePage=yes
 DisableDirPage=yes
 DisableProgramGroupPage=yes
 DisableReadyPage=yes
 DisableFinishedPage=yes
 
-; Keep uninstaller registry entry unified[cite: 5]
+; Keep uninstaller registry entry unified
 Uninstallable=yes
 CreateUninstallRegKey=yes
 UninstallDisplayName=Loqin
@@ -48,9 +51,38 @@ Filename: "{app}\Loqin.exe"; Description: "{cm:LaunchProgram,Loqin}"; Flags: now
 [Code]
 var
   DownloadPage: TDownloadWizardPage;
+  LicenseLink: TNewStaticText;
+
+// Triggered when the user clicks the custom GPLv3 link
+procedure LicenseLinkClick(Sender: TObject);
+var
+  ErrorCode: Integer;
+begin
+  ShellExec('open', 'https://github.com/notaayushsrivastava/Loqin/blob/master/LICENSE', '', '', SW_SHOWNORMAL, ewNoWait, ErrorCode);
+end;
 
 procedure InitializeWizard;
 begin
+  // Custom copyright watermark footer
+  WizardForm.BeveledLabel.Caption := ' | Loqin v1.5.0 • © 2026 Aayush Srivastava';
+  WizardForm.BeveledLabel.Visible := True;
+
+  // Create the clickable GPLv3 License link
+  LicenseLink := TNewStaticText.Create(WizardForm);
+  LicenseLink.Parent := WizardForm;
+  LicenseLink.Caption := 'View GPLv3 License';
+  LicenseLink.Cursor := crHand;
+  LicenseLink.Font.Color := clBlue;
+  LicenseLink.Font.Style := [fsUnderline];
+  LicenseLink.Left := 20;
+  // Align it vertically with the Cancel/Next buttons at the bottom
+  LicenseLink.Top := WizardForm.CancelButton.Top + 6;
+  LicenseLink.OnClick := @LicenseLinkClick;
+
+  // Shift the BeveledLabel over so it sits next to the new link
+  WizardForm.BeveledLabel.Left := LicenseLink.Left + LicenseLink.Width + 5; 
+  WizardForm.BeveledLabel.Top := LicenseLink.Top;
+
   // Initialize the native Inno Setup download page
   DownloadPage := CreateDownloadPage(SetupMessage(msgWizardPreparing), SetupMessage(msgPreparingDesc), nil);
 end;
@@ -59,7 +91,7 @@ function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;
 begin
-  // 1. Terminate running Loqin instance before replacing files[cite: 5]
+  // 1. Terminate running Loqin instance before replacing files
   Exec('taskkill.exe', '/f /im Loqin.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
   // 2. Download the raw executable directly from GitHub to the {tmp} directory

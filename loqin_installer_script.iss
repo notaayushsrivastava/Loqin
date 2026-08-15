@@ -1,7 +1,7 @@
 [Setup]
 AppId={{A2B3C4D5-1234-5678-90AB-CDEF12345678}
 AppName=Loqin
-AppVersion=1.4.5
+AppVersion=1.5.0
 AppPublisher=Aayush Srivastava
 AppCopyright=Copyright (C) 2026 Aayush Srivastava. All rights reserved.
 AppPublisherURL=https://github.com/notaayushsrivastava
@@ -14,6 +14,9 @@ Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=admin
+
+; --- EULA CONFIGURATION ---
+LicenseFile=eula.txt
 
 ; --- FORCE WELCOME PAGE TO SHOW ---
 DisableWelcomePage=no
@@ -65,6 +68,7 @@ Filename: "{app}\Loqin.exe"; Description: "{cm:LaunchProgram,Loqin}"; Flags: now
 var
   UserCredentialsPage: TInputQueryWizardPage;
   ShowPasswordCheckBox: TCheckBox;
+  LicenseLink: TNewStaticText;
 
 procedure CustomizeHorizontalBanner();
 var
@@ -135,14 +139,38 @@ begin
     UserCredentialsPage.Edits[1].Password := True;
 end;
 
+// Triggered when the user clicks the custom GPLv3 link
+procedure LicenseLinkClick(Sender: TObject);
+var
+  ErrorCode: Integer;
+begin
+  ShellExec('open', 'https://github.com/notaayushsrivastava/Loqin/blob/master/LICENSE', '', '', SW_SHOWNORMAL, ewNoWait, ErrorCode);
+end;
+
 procedure InitializeWizard();
 begin
   // Apply symmetrical banner layout and expand window height
   CustomizeHorizontalBanner();
 
   // Custom copyright watermark footer
-  WizardForm.BeveledLabel.Caption := ' Loqin v1.1.0 • © 2026 Aayush Srivastava';
+  WizardForm.BeveledLabel.Caption := ' | Loqin v1.5.0 • © 2026 Aayush Srivastava';
   WizardForm.BeveledLabel.Visible := True;
+
+  // Create the clickable GPLv3 License link
+  LicenseLink := TNewStaticText.Create(WizardForm);
+  LicenseLink.Parent := WizardForm;
+  LicenseLink.Caption := 'View GPLv3 License';
+  LicenseLink.Cursor := crHand;
+  LicenseLink.Font.Color := clBlue;
+  LicenseLink.Font.Style := [fsUnderline];
+  LicenseLink.Left := 20;
+  // Align it vertically with the Cancel/Next buttons at the bottom
+  LicenseLink.Top := WizardForm.CancelButton.Top + 6;
+  LicenseLink.OnClick := @LicenseLinkClick;
+
+  // Shift the BeveledLabel over so it sits next to the new link
+  WizardForm.BeveledLabel.Left := LicenseLink.Left + LicenseLink.Width + 5; 
+  WizardForm.BeveledLabel.Top := LicenseLink.Top;
 
   // Credentials input page setup
   UserCredentialsPage := CreateInputQueryPage(
