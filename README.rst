@@ -7,7 +7,7 @@ Loqin PC - Automated VIT Hostel Wi-Fi Client
    :alt: Loqin PC Banner
 
 .. image:: https://img.shields.io/badge/Download-Loqin_Installer-0078D4?style=for-the-badge&logo=windows&logoColor=white
-   :target: https://github.com/notaayushsrivastava/Loqin/raw/refs/heads/master/Output/Install_Loqin.exe
+   :target: https://github.com/notaayushsrivastava/Loqin/releases/latest/download/Install_loqin.exe
    :alt: Download Loqin PC Installer
 
 .. image:: https://img.shields.io/badge/Python-3.8%2B-blue.svg
