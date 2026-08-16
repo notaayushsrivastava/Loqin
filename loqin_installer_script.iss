@@ -1,7 +1,7 @@
 [Setup]
 AppId={{A2B3C4D5-1234-5678-90AB-CDEF12345678}
 AppName=Loqin
-AppVersion=1.5.0
+AppVersion=1.6.0
 AppPublisher=Aayush Srivastava
 AppCopyright=Copyright (C) 2026 Aayush Srivastava. All rights reserved.
 AppPublisherURL=https://github.com/notaayushsrivastava
@@ -153,7 +153,7 @@ begin
   CustomizeHorizontalBanner();
 
   // Custom copyright watermark footer
-  WizardForm.BeveledLabel.Caption := ' | Loqin v1.5.0 • © 2026 Aayush Srivastava';
+  WizardForm.BeveledLabel.Caption := ' | Loqin v1.6.0 • © 2026 Aayush Srivastava';
   WizardForm.BeveledLabel.Visible := True;
 
   // Create the clickable GPLv3 License link

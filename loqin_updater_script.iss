@@ -1,7 +1,7 @@
 [Setup]
 AppId={{A2B3C4D5-1234-5678-90AB-CDEF12345678}
 AppName=Loqin
-AppVersion=1.5.0
+AppVersion=1.6.0
 AppPublisher=Aayush Srivastava
 AppCopyright=Copyright (C) 2026 Aayush Srivastava. All rights reserved.
 DefaultDirName={autopf}\Loqin
@@ -25,7 +25,7 @@ DisableWelcomePage=yes
 DisableDirPage=yes
 DisableProgramGroupPage=yes
 DisableReadyPage=yes
-DisableFinishedPage=yes
+DisableFinishedPage=no
 
 ; Keep uninstaller registry entry unified
 Uninstallable=yes
@@ -43,11 +43,6 @@ Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Services\NlaSvc\Parameters\Interne
 Source: "{tmp}\Loqin.exe"; DestDir: "{app}"; Flags: external ignoreversion
 Source: "assets\loqin_logo_small.png"; DestDir: "{app}"; Flags: ignoreversion
 
-[Run]
-; Auto-relaunch Loqin quietly after installation completes
-; Added 'runasoriginaluser' to prevent Admin %TEMP% conflicts and 'shellexec' to let the OS handle the launch safely
-Filename: "{app}\Loqin.exe"; Description: "{cm:LaunchProgram,Loqin}"; Flags: nowait postinstall skipifsilent runasoriginaluser shellexec
-
 [Code]
 var
   DownloadPage: TDownloadWizardPage;
@@ -64,7 +59,7 @@ end;
 procedure InitializeWizard;
 begin
   // Custom copyright watermark footer
-  WizardForm.BeveledLabel.Caption := ' | Loqin v1.5.0 • © 2026 Aayush Srivastava';
+  WizardForm.BeveledLabel.Caption := ' | Loqin v1.6.0 • © 2026 Aayush Srivastava';
   WizardForm.BeveledLabel.Visible := True;
 
   // Create the clickable GPLv3 License link
@@ -85,6 +80,12 @@ begin
 
   // Initialize the native Inno Setup download page
   DownloadPage := CreateDownloadPage(SetupMessage(msgWizardPreparing), SetupMessage(msgPreparingDesc), nil);
+
+  // Customize the standard completion page so the updater ends with a clear hand-off.
+  WizardForm.FinishedHeadingLabel.Caption := 'Loqin has been installed successfully!';
+  WizardForm.FinishedLabel.Caption :=
+    'The update has been successfully installed.' + #13#10 + #13#10 +
+    'Please run Loqin normally now from your Start Menu or desktop shortcut.'
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;

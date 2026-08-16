@@ -13,6 +13,7 @@ import ctypes.wintypes
 import pywifi
 from pywifi import const
 from bs4 import BeautifulSoup
+from datetime import datetime
 from urllib.parse import urlparse
 from PyQt6.QtWidgets import (
     QApplication, QSystemTrayIcon, QMenu, QDialog, QVBoxLayout, 
@@ -20,15 +21,16 @@ from PyQt6.QtWidgets import (
     QCheckBox, QMessageBox, QDialog, QVBoxLayout, QLabel, QProgressDialog,
     QDialog, QVBoxLayout, QTextBrowser, QDialogButtonBox, QTableWidget,
     QHeaderView, QTableWidgetItem, QAbstractItemView, QTabWidget,
-    QWidget, QFormLayout
+    QWidget, QFormLayout, QScrollArea, QInputDialog, QGridLayout, QFrame,
+    QGraphicsOpacityEffect
 )
 from PyQt6.QtGui import QIcon, QAction, QPixmap, QColor, QPainter, QDesktopServices, QCursor
-from PyQt6.QtCore import QThread, pyqtSignal, Qt, QTimer, QUrl, QAbstractNativeEventFilter
+from PyQt6.QtCore import QThread, pyqtSignal, Qt, QTimer, QUrl, QAbstractNativeEventFilter, QPropertyAnimation, QEasingCurve, QSize
 
 APP_NAME = "Loqin"
 APPDATA_DIR = os.path.join(os.getenv("APPDATA", os.path.expanduser("~")), "Loqin")
 CONFIG_FILE = os.path.join(APPDATA_DIR, "Loqin_config.json")
-APP_VERSION = "1.5.0"
+APP_VERSION = "1.6.0"
 GITHUB_API_URL = "https://api.github.com/repos/notaayushsrivastava/loqin/releases/latest"
 
 # --- WINDOWS STARTUP REGISTRY HELPER ---
@@ -253,6 +255,400 @@ class PerformanceModeThread(QThread):
         except Exception as e:
             self.status_signal.emit(f"Wi-Fi Error: {str(e)}", "error")
 
+
+# --- WI-FI HELPERS / AUTO-CONNECT ---
+def get_current_wifi_ssid():
+    """Return the currently connected Wi-Fi SSID using Windows WLAN APIs."""
+    if sys.platform != "win32":
+        return ""
+
+    try:
+        output = subprocess.check_output(
+            ["netsh", "wlan", "show", "interfaces"],
+            creationflags=0x08000000,
+            timeout=5
+        ).decode("utf-8", errors="ignore")
+
+        for line in output.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("SSID") and not stripped.startswith("BSSID"):
+                parts = stripped.split(":", 1)
+                if len(parts) == 2:
+                    return parts[1].strip()
+    except Exception:
+        pass
+
+    return ""
+
+
+class WiFiConnectThread(QThread):
+    """Connect to a previously saved Windows Wi-Fi profile without blocking the UI."""
+    connected = pyqtSignal(str)
+    failed = pyqtSignal(str)
+
+    def __init__(self, ssid, parent=None):
+        super().__init__(parent)
+        self.ssid = ssid
+
+    def run(self):
+        if not self.ssid:
+            self.failed.emit("No Wi-Fi network was selected.")
+            return
+
+        try:
+            # Reuse the Wi-Fi profile already stored by Windows.
+            result = subprocess.run(
+                ["netsh", "wlan", "connect", f"name={self.ssid}"],
+                capture_output=True,
+                text=True,
+                creationflags=0x08000000,
+                timeout=10
+            )
+
+            # netsh can return before association actually finishes.
+            deadline = time.time() + 12
+            while time.time() < deadline:
+                current_ssid = get_current_wifi_ssid()
+                if current_ssid.lower() == self.ssid.lower():
+                    self.connected.emit(self.ssid)
+                    return
+                self.msleep(500)
+
+            detail = (result.stdout or result.stderr or "Windows could not connect to the saved Wi-Fi profile.").strip()
+            self.failed.emit(detail)
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
+# --- WI-FI PICKER ---
+class WiFiScanThread(QThread):
+    """Keep the (occasionally slow) Windows WLAN scan off the UI thread."""
+    networks_found = pyqtSignal(list)
+    scan_failed = pyqtSignal(str)
+
+    def run(self):
+        try:
+            wifi = pywifi.PyWiFi()
+            interfaces = wifi.interfaces()
+            if not interfaces:
+                raise RuntimeError("No Wi-Fi adapter was found.")
+
+            iface = interfaces[0]
+            iface.scan()
+            self.sleep(3) # Wait for the hardware scan to populate
+            networks = {}
+            for network in iface.scan_results():
+                ssid = (network.ssid or "").strip()
+                if not ssid:
+                    continue
+                # Several access points can broadcast the same name. One card per SSID
+                # is less noisy, and the strongest signal is the useful one.
+                signal = int(network.signal or -100)
+                existing = networks.get(ssid)
+                if existing is None or signal > existing["signal"]:
+                    networks[ssid] = {
+                        "ssid": ssid,
+                        "signal": signal,
+                        "secured": network.akm != [const.AKM_TYPE_NONE],
+                    }
+            self.networks_found.emit(list(networks.values()))
+        except Exception as exc:
+            self.scan_failed.emit(str(exc))
+
+
+def wifi_signal_color(signal):
+    """Map Wi-Fi RSSI (dBm) to a connection-quality border color."""
+    try:
+        signal = int(signal)
+    except (TypeError, ValueError):
+        signal = -100
+
+    # Excellent -> Poor. RSSI is normally a negative dBm value.
+    if signal >= -50:
+        return "#14532D"      # Dark green - excellent
+    if signal >= -60:
+        return "#16A34A"      # Green - very good
+    if signal >= -67:
+        return "#84CC16"      # Lime - good
+    if signal >= -75:
+        return "#EAB308"      # Yellow - fair
+    if signal >= -85:
+        return "#F97316"      # Orange - weak
+    return "#DC2626"          # Red - poor
+
+
+class WiFiPickerDialog(QDialog):
+    wifi_chosen = pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        
+        # Initialize the background scan thread
+        self.scan_thread = WiFiScanThread()
+        self.scan_thread.networks_found.connect(self.on_scan_finished)
+        self.scan_thread.scan_failed.connect(self.on_scan_failed)
+        
+        self.is_connecting = False
+        self.initial_scan_done = False
+        self.reusable_network_buttons = []
+        self.skeleton_anims = [] # Keep animation references alive
+
+        self.setWindowTitle("Loqin • Choose Wi-Fi")
+        self.setMinimumSize(760, 580)
+        self.resize(860, 680)
+
+        self.setStyleSheet("""
+            QDialog {
+                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1,
+                    stop: 0 #2a1b42, stop: 0.5 #1e2247, stop: 1 #121832);
+            }
+            QLabel { color: #f4f7fb; }
+            QScrollArea { border: none; background: transparent; }
+            QWidget#cardsContainer { background: transparent; }
+            QScrollBar:vertical { width: 9px; background: transparent; margin: 6px; }
+            QScrollBar::handle:vertical { background: rgba(255, 255, 255, 0.2); border-radius: 4px; min-height: 28px; }
+            QPushButton#refresh {
+                color: #05111c;
+                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1, stop: 0 #66c7ff, stop: 1 #bb7cff);
+                border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px;
+                font-size: 13px; font-weight: 800; padding: 10px 16px; min-width: 110px;
+            }
+            QPushButton#refresh:hover { background: #82d4ff; }
+            QPushButton#wifiTile, QPushButton#portalTile {
+                text-align: center;
+                border-radius: 14px;
+                padding: 10px;
+                min-height: 156px;
+                min-width: 178px;
+                font-size: 16px;
+                font-weight: 700;
+                border: 2px solid transparent;
+            }
+            QPushButton#wifiTile {
+                color: #eff6ff;
+                background: rgba(255, 255, 255, 0.08);
+            }
+            QPushButton#wifiTile:hover {
+                background: rgba(255, 255, 255, 0.15);
+            }
+            QPushButton#portalTile {
+                color: #05111c;
+                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1, stop: 0 #66c7ff, stop: 1 #bb7cff);
+            }
+            QPushButton#portalTile:hover {
+                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1, stop: 0 #82d4ff, stop: 1 #d39fff);
+            }
+            QFrame#skeletonTile { background: rgba(255, 255, 255, 0.1); border-radius: 14px; min-height: 156px; min-width: 178px; }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(28, 24, 28, 24)
+        layout.setSpacing(12)
+
+        heading = QLabel("Choose your network")
+        heading.setStyleSheet("font-size: 30px; font-weight: 700; color: #f8fafc;")
+        layout.addWidget(heading)
+
+        subheading = QLabel("Portal networks appear first. Pick a tile to connect.")
+        subheading.setStyleSheet("color: #a7b0d6; font-size: 13px;")
+        layout.addWidget(subheading)
+
+        toolbar = QHBoxLayout()
+        self.status = QLabel("Scanning nearby networks…")
+        self.status.setStyleSheet("color: #66c7ff; font-weight: 600;")
+        toolbar.addWidget(self.status)
+        toolbar.addStretch()
+
+        refresh = QPushButton("Refresh")
+        refresh.setObjectName("refresh")
+        refresh.setCursor(Qt.CursorShape.PointingHandCursor)
+        refresh.clicked.connect(self.scan_networks)
+        toolbar.addWidget(refresh)
+        layout.addLayout(toolbar)
+
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.cards = QWidget()
+        self.cards.setObjectName("cardsContainer")
+
+        self.cards_layout = QGridLayout(self.cards)
+        self.cards_layout.setContentsMargins(14, 14, 14, 14)
+        self.cards_layout.setSpacing(12)
+        self.cards_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+
+        self.scroll.setWidget(self.cards)
+        layout.addWidget(self.scroll, 1)
+
+        self.show_skeleton_loading()
+
+        # Set up a silent 5-second auto-refresher
+        self.auto_refresh_timer = QTimer(self)
+        self.auto_refresh_timer.setInterval(5000)
+        self.auto_refresh_timer.timeout.connect(self.scan_networks)
+        self.auto_refresh_timer.start()
+
+        # Trigger first real scan
+        self.scan_networks()
+
+    def show_skeleton_loading(self, count=6, columns=3):
+        """Displays temporary wireframe cards with a pulsing opacity animation."""
+        self.clear_cards_layout()
+        self.skeleton_anims.clear()
+        
+        for index in range(count):
+            skeleton = QFrame()
+            skeleton.setObjectName("skeletonTile")
+            
+            # Setup the pulsing animation
+            effect = QGraphicsOpacityEffect(skeleton)
+            skeleton.setGraphicsEffect(effect)
+            
+            anim = QPropertyAnimation(effect, b"opacity")
+            anim.setDuration(1200) # 1.2 seconds per pulse cycle
+            anim.setStartValue(0.3)
+            anim.setKeyValueAt(0.5, 0.8) # Peak brightness halfway through
+            anim.setEndValue(0.3)
+            anim.setEasingCurve(QEasingCurve.Type.InOutSine)
+            anim.setLoopCount(-1) # Loop infinitely
+            anim.start()
+            
+            self.skeleton_anims.append(anim) # Keep reference to prevent garbage collection
+            
+            row = index // columns
+            col = index % columns
+            self.cards_layout.addWidget(skeleton, row, col)
+
+    def clear_cards_layout(self):
+        """Helper to clear the grid layout completely."""
+        while self.cards_layout.count():
+            item = self.cards_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+    def scan_networks(self):
+        if self.is_connecting or self.scan_thread.isRunning():
+            return
+            
+        if not self.initial_scan_done:
+            self.status.setText("Scanning nearby networks…")
+            
+        self.scan_thread.start()
+
+    def on_scan_failed(self, error):
+        self.status.setText(f"Scan failed: {error}")
+        self.status.setStyleSheet("color: #e74c3c; font-weight: 600;")
+
+    def on_scan_finished(self, networks):
+        portal_networks = []
+        normal_networks = []
+        
+        networks.sort(key=lambda x: x['signal'], reverse=True)
+        
+        for net in networks:
+            if not net.get('secured', True):
+                portal_networks.append(net)
+            else:
+                normal_networks.append(net)
+                
+        self.update_networks_ui(portal_networks, normal_networks)
+        
+        current_time = datetime.now().strftime("%I:%M:%S %p")
+        self.status.setText(f"Scan complete. Last updated at {current_time}")
+        self.status.setStyleSheet("color: #66c7ff; font-weight: 600;")
+
+    def update_networks_ui(self, portal_networks, normal_networks, columns=3):
+        combined_networks = [(net, True) for net in portal_networks] + [(net, False) for net in normal_networks]
+
+        if not self.initial_scan_done:
+            self.skeleton_anims.clear()  # Stop animations before clearing
+            self.clear_cards_layout()
+            self.initial_scan_done = True
+
+        for index in range(max(len(combined_networks), len(self.reusable_network_buttons))):
+            if index < len(combined_networks):
+                network_data, is_portal = combined_networks[index]
+                ssid = network_data.get("ssid", "Unknown") if isinstance(network_data, dict) else str(network_data)
+                signal = int(network_data.get("signal", -100)) if isinstance(network_data, dict) else -100
+                signal_color = wifi_signal_color(signal)
+
+                if index >= len(self.reusable_network_buttons):
+                    btn = QPushButton()
+                    btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                    btn.setIcon(QIcon(resource_path("wifi.svg")))
+                    btn.setIconSize(QSize(54, 54))
+                    btn.setMinimumHeight(156)
+                    btn.setMinimumWidth(178)
+                    self.reusable_network_buttons.append(btn)
+                    row = index // columns
+                    col = index % columns
+                    self.cards_layout.addWidget(btn, row, col)
+                
+                btn = self.reusable_network_buttons[index]
+                btn.setText(ssid)
+                btn.setIcon(QIcon(resource_path("wifi.svg")))
+                btn.setIconSize(QSize(54, 54))
+                if is_portal:
+                    background_css = (
+                        "qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1, "
+                        "stop: 0 #66c7ff, stop: 1 #bb7cff)"
+                    )
+                    hover_background_css = (
+                        "qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1, "
+                        "stop: 0 #82d4ff, stop: 1 #d39fff)"
+                    )
+                    text_color = "#05111c"
+                else:
+                    background_css = "rgba(255, 255, 255, 0.08)"
+                    hover_background_css = "rgba(255, 255, 255, 0.15)"
+                    text_color = "#eff6ff"
+
+                btn.setStyleSheet(f"""
+                    QPushButton {{
+                        color: {text_color};
+                        background: {background_css};
+                        border: 2px solid {signal_color};
+                        border-radius: 14px;
+                        padding: 12px;
+                        min-height: 156px;
+                        min-width: 178px;
+                        font-size: 16px;
+                        font-weight: 700;
+                    }}
+                    QPushButton:hover {{
+                        background: {hover_background_css};
+                        border: 2px solid {signal_color};
+                    }}
+                    QPushButton:pressed {{
+                        background: rgba(0, 0, 0, 0.16);
+                        border: 2px solid {signal_color};
+                    }}
+                """)
+
+                try:
+                    btn.clicked.disconnect()
+                except TypeError:
+                    pass
+
+                btn.clicked.connect(
+                    lambda checked=False, target_ssid=ssid: self.connect_to_network(target_ssid)
+                )
+
+                target_id = "portalTile" if is_portal else "wifiTile"
+                btn.setObjectName(target_id)
+                btn.setVisible(True)
+
+            else:
+                self.reusable_network_buttons[index].setVisible(False)
+
+    def connect_to_network(self, ssid):
+        self.is_connecting = True
+        self.status.setText(f"Connecting to {ssid}...")
+        self.status.setStyleSheet("color: #f1c40f; font-weight: 600;")
+        
+        self.auto_refresh_timer.stop()
+        
+        self.wifi_chosen.emit(ssid)
+        self.accept()
 
 # --- AUTO-UPDATER THREADS ---
 class UpdateChecker(QThread):
@@ -669,7 +1065,8 @@ class ConfigManager:
         default_config = {
             "username": "",
             "interval": 10,
-            "auto_connect": True
+            "auto_connect": True,
+            "last_wifi_ssid": ""
         }
         ConfigManager.ensure_dir_exists()
         
@@ -1260,10 +1657,21 @@ class LoqinTrayApp:
         self.graph_dialog = None
         self.build_menu()
 
+        self.wifi_picker = None
+        self.waiting_for_wifi_choice = True
+        self.selected_wifi_ssid = ""
+        self.wifi_connect_thread = None
+        self.wifi_startup_thread = None
+
         self.worker = None
-        self.start_monitoring_timer()
+        self.status_action.setText("Status: Looking for your last Wi-Fi...")
+        self.status_action.setIcon(create_status_icon("yellow"))
+        self.tray.setToolTip("Loqin - Connecting to Wi-Fi")
 
         self.force_logout()
+        # Give Windows a moment to initialize its WLAN service, then try the
+        # last successfully connected Wi-Fi before showing the picker.
+        QTimer.singleShot(1200, self.auto_connect_last_wifi)
         
         # Bandwidth & Speed Meter update timer (1 second interval)
         self.speed_timer = QTimer()
@@ -1298,6 +1706,10 @@ class LoqinTrayApp:
         connect_action = QAction("Connect Now", self.menu)
         connect_action.triggered.connect(self.trigger_manual_check)
         self.menu.addAction(connect_action)
+
+        wifi_action = QAction("Choose Wi-Fi", self.menu)
+        wifi_action.triggered.connect(self.open_wifi_picker)
+        self.menu.addAction(wifi_action)
 
         self.pause_action = QAction("Pause Loqin", self.menu)
         self.pause_action.triggered.connect(self.toggle_service_pause)
@@ -1466,6 +1878,12 @@ class LoqinTrayApp:
         # Prevent overwriting an actively running thread
         if hasattr(self, 'worker') and self.worker and self.worker.isRunning():
             return
+
+        if self.waiting_for_wifi_choice:
+            self.status_action.setText("Status: Choose Wi-Fi to continue")
+            self.status_action.setIcon(create_status_icon("yellow"))
+            self.tray.setToolTip("Loqin - Waiting for Wi-Fi selection")
+            return
             
         # --- NEW: Detect New Wi-Fi (BSSID Change) ---
         current_bssid = None
@@ -1524,6 +1942,11 @@ class LoqinTrayApp:
 
         # --- Trigger Update Check on Successful Connection ---
         if color_type == "green":
+            current_ssid = get_current_wifi_ssid()
+            if current_ssid:
+                self.selected_wifi_ssid = current_ssid
+                self.save_last_wifi(current_ssid)
+
             if "successfully" in message:
                 self.tray.showMessage("Loqin", message, self.icon, 3000)
             
@@ -1709,10 +2132,115 @@ class LoqinTrayApp:
         if hasattr(self, 'timer') and self.timer:
             self.timer.stop()
 
-        self.timer = QTimer()
+        self.timer = QTimer(self.app)
         self.timer.timeout.connect(self.trigger_manual_check)
         self.timer.start(self.config.get("interval", 10) * 1000)
-        self.trigger_manual_check()
+
+        if not self.waiting_for_wifi_choice:
+            self.trigger_manual_check()
+
+    def save_last_wifi(self, ssid):
+        """Persist the last successfully connected Wi-Fi SSID."""
+        ssid = (ssid or "").strip()
+        if not ssid:
+            return
+        self.config["last_wifi_ssid"] = ssid
+        ConfigManager.save_config(self.config)
+
+    def auto_connect_last_wifi(self):
+        """Scan for the last Wi-Fi. Use it automatically when it is in range."""
+        last_ssid = (self.config.get("last_wifi_ssid") or "").strip()
+
+        if not last_ssid:
+            self.open_wifi_picker()
+            return
+
+        if get_current_wifi_ssid().lower() == last_ssid.lower():
+            self.on_wifi_connection_success(last_ssid, automatic=True)
+            return
+
+        self.status_action.setText(f"Status: Searching for {last_ssid}...")
+        self.status_action.setIcon(create_status_icon("yellow"))
+        self.tray.setToolTip(f"Loqin - Looking for {last_ssid}")
+
+        if self.wifi_startup_thread and self.wifi_startup_thread.isRunning():
+            return
+
+        self.wifi_startup_thread = WiFiScanThread()
+        self.wifi_startup_thread.networks_found.connect(
+            lambda networks: self.on_startup_scan_finished(networks, last_ssid)
+        )
+        self.wifi_startup_thread.scan_failed.connect(self.on_startup_scan_failed)
+        self.wifi_startup_thread.finished.connect(self._cleanup_startup_wifi_thread)
+        self.wifi_startup_thread.start()
+
+    def _cleanup_startup_wifi_thread(self):
+        self.wifi_startup_thread = None
+
+    def on_startup_scan_finished(self, networks, last_ssid):
+        available = any(
+            isinstance(network, dict) and
+            network.get("ssid", "").strip().lower() == last_ssid.lower()
+            for network in networks
+        )
+
+        if available:
+            self.connect_to_wifi(last_ssid, automatic=True)
+        else:
+            self.status_action.setText("Status: Last Wi-Fi not in range")
+            self.status_action.setIcon(create_status_icon("yellow"))
+            self.open_wifi_picker()
+
+    def on_startup_scan_failed(self, error):
+        print(f"Startup Wi-Fi scan failed: {error}")
+        self.open_wifi_picker()
+
+    def connect_to_wifi(self, ssid, automatic=False):
+        """Connect to a Windows-saved Wi-Fi profile without blocking the UI."""
+        if self.wifi_connect_thread and self.wifi_connect_thread.isRunning():
+            return
+
+        self.selected_wifi_ssid = ssid
+        self.status_action.setText(
+            f"Status: {'Connecting to your last Wi-Fi' if automatic else f'Connecting to {ssid}'}..."
+        )
+        self.status_action.setIcon(create_status_icon("yellow"))
+        self.tray.setToolTip(f"Loqin - Connecting to {ssid}")
+
+        self.wifi_connect_thread = WiFiConnectThread(ssid)
+        self.wifi_connect_thread.connected.connect(
+            lambda connected_ssid: self.on_wifi_connection_success(connected_ssid, automatic)
+        )
+        self.wifi_connect_thread.failed.connect(
+            lambda error: self.on_wifi_connection_failed(ssid, error)
+        )
+        self.wifi_connect_thread.finished.connect(self._cleanup_wifi_connect_thread)
+        self.wifi_connect_thread.start()
+
+    def _cleanup_wifi_connect_thread(self):
+        self.wifi_connect_thread = None
+
+    def on_wifi_connection_success(self, ssid, automatic=False):
+        self.selected_wifi_ssid = ssid
+        self.waiting_for_wifi_choice = False
+        self.save_last_wifi(ssid)
+
+        self.status_action.setText(f"Status: Wi-Fi connected ({ssid})")
+        self.status_action.setIcon(create_status_icon("green"))
+        self.tray.setToolTip(f"Loqin - {ssid}")
+
+        if self.wifi_picker and self.wifi_picker.isVisible():
+            self.wifi_picker.close()
+
+        self.start_monitoring_timer()
+
+    def on_wifi_connection_failed(self, ssid, error):
+        print(f"Could not connect to {ssid}: {error}")
+        self.waiting_for_wifi_choice = True
+        self.status_action.setText("Status: Choose Wi-Fi to continue")
+        self.status_action.setIcon(create_status_icon("yellow"))
+        self.tray.setToolTip("Loqin - Waiting for Wi-Fi selection")
+        self.open_wifi_picker()
 
     def force_logout(self):
         """Silently drops the Pronto Networks Wi-Fi session."""
@@ -1722,6 +2250,19 @@ class LoqinTrayApp:
             print("Successfully dropped existing Wi-Fi session.")
         except Exception as e:
             print(f"Logout check bypassed (likely not connected): {e}")
+
+    def open_wifi_picker(self):
+        if self.wifi_picker is None:
+            self.wifi_picker = WiFiPickerDialog()
+            self.wifi_picker.wifi_chosen.connect(self.on_wifi_chosen)
+        else:
+            self.wifi_picker.scan_networks()
+        self.wifi_picker.show()
+        self.wifi_picker.raise_()
+        self.wifi_picker.activateWindow()
+
+    def on_wifi_chosen(self, ssid):
+        self.connect_to_wifi(ssid, automatic=False)
 
     def run(self):
         sys.exit(self.app.exec())

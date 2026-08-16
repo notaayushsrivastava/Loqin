@@ -20,7 +20,7 @@ Loqin PC - Automated VIT Hostel Wi-Fi Client
 .. image:: https://img.shields.io/badge/Platform-Windows-lightgrey.svg
 .. image:: https://img.shields.io/badge/Maintained%20by-Aayush%20Srivastava-orange.svg
    :target: https://aayushsrivastava.pythonanywhere.com/
-.. image:: https://img.shields.io/badge/version-1.5.0-blue.svg
+.. image:: https://img.shields.io/badge/version-1.6.0-blue.svg
    :target: https://github.com/notaayushsrivastava/Loqin/releases
 .. image:: https://img.shields.io/badge/License-GPLv3-blue.svg
    :target: LICENSE
