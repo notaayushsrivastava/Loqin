@@ -9,6 +9,9 @@ Loqin PC - Automated VIT Hostel Wi-Fi Client
 .. image:: https://img.shields.io/badge/Download-Loqin_Installer-0078D4?style=for-the-badge&logo=windows&logoColor=white
    :target: https://github.com/notaayushsrivastava/Loqin/releases/latest/download/Install_loqin.exe
    :alt: Download Loqin PC Installer
+.. image:: https://img.shields.io/badge/Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white
+   :target: https://loqin-vit.vercel.app/
+   :alt: Deployed on Vercel
 
 .. image:: https://img.shields.io/badge/Python-3.8%2B-blue.svg
    :target: https://www.python.org/
