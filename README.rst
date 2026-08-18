@@ -6,12 +6,19 @@ Loqin PC - Automated VIT Hostel Wi-Fi Client
    :width: 100%
    :alt: Loqin PC Banner
 
-.. image:: https://img.shields.io/badge/Download-Loqin_Installer-0078D4?style=for-the-badge&logo=windows&logoColor=white
+.. |installer| image:: https://img.shields.io/badge/Download-Loqin_Installer-0078D4?style=for-the-badge&logo=windows&logoColor=white
    :target: https://github.com/notaayushsrivastava/Loqin/releases/latest/download/Install_loqin.exe
    :alt: Download Loqin PC Installer
-.. image:: https://img.shields.io/badge/Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white
+
+.. |vercel| image:: https://img.shields.io/badge/Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white
    :target: https://loqin-vit.vercel.app/
    :alt: Deployed on Vercel
+
+.. |winget| image:: https://img.shields.io/winget/v/notaayushsrivastava.Loqin?logo=windows
+   :target: https://winget.run/pkg/notaayushsrivastava.Loqin
+   :alt: WinGet Version
+
+|installer| |vercel| |winget|
 
 .. image:: https://img.shields.io/badge/Python-3.8%2B-blue.svg
    :target: https://www.python.org/
@@ -20,7 +27,7 @@ Loqin PC - Automated VIT Hostel Wi-Fi Client
 .. image:: https://img.shields.io/badge/Platform-Windows-lightgrey.svg
 .. image:: https://img.shields.io/badge/Maintained%20by-Aayush%20Srivastava-orange.svg
    :target: https://aayushsrivastava.pythonanywhere.com/
-.. image:: https://img.shields.io/badge/version-1.6.0-blue.svg
+.. image:: https://img.shields.io/badge/version-1.6.4-blue.svg
    :target: https://github.com/notaayushsrivastava/Loqin/releases
 .. image:: https://img.shields.io/badge/License-GPLv3-blue.svg
    :target: LICENSE
@@ -54,6 +61,16 @@ Step 1: Download & Install
 2. Run the installer executable.
 3. When prompted by the setup wizard, enter your **Registration Number / Username** and **Password**.
 4. Check **Launch automatically on Windows startup** if you want the app to run on boot, then complete installation.
+
+**OR**
+
+1. Install using winget
+
+   .. code-block:: bash
+
+      winget install loqin
+
+2. Proceed as the installer instructs.
 
 Step 2: App Launch & System Tray
 --------------------------------

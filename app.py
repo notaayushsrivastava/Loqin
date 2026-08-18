@@ -11,6 +11,7 @@ import re
 import ctypes
 import ctypes.wintypes
 import pywifi
+import winreg
 from pywifi import const
 from bs4 import BeautifulSoup
 from datetime import datetime
@@ -30,7 +31,7 @@ from PyQt6.QtCore import QThread, pyqtSignal, Qt, QTimer, QUrl, QAbstractNativeE
 APP_NAME = "Loqin"
 APPDATA_DIR = os.path.join(os.getenv("APPDATA", os.path.expanduser("~")), "Loqin")
 CONFIG_FILE = os.path.join(APPDATA_DIR, "Loqin_config.json")
-APP_VERSION = "1.6.0"
+APP_VERSION = "1.6.4"
 GITHUB_API_URL = "https://api.github.com/repos/notaayushsrivastava/loqin/releases/latest"
 
 # --- WINDOWS STARTUP REGISTRY HELPER ---
@@ -67,7 +68,6 @@ def set_auto_start(enabled: bool):
     if sys.platform != "win32":
         return
 
-    import winreg
     try:
         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REG_PATH, 0, winreg.KEY_ALL_ACCESS)
         if enabled:
@@ -90,7 +90,6 @@ def is_auto_start_enabled() -> bool:
     if sys.platform != "win32":
         return False
 
-    import winreg
     try:
         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REG_PATH, 0, winreg.KEY_READ)
         winreg.QueryValueEx(key, APP_REG_NAME)
@@ -166,10 +165,14 @@ class PowerEventFilter(QAbstractNativeEventFilter):
                 
                 # --- FIX: Reset update flag so UpdateChecker waits for active Wi-Fi ---
                 self.tray_app.has_checked_for_updates = False
+
+                # --- Trigger auto-connect on wake ---
+                QTimer.singleShot(2000, self.tray_app.auto_connect_last_wifi)
                 
                 # --- Run Performance Thread on wake (only if turned on) ---
                 if hasattr(self.tray_app, 'perf_action') and self.tray_app.perf_action.isChecked():
-                    self.tray_app.trigger_performance_mode(checked=True)
+                    # Delay by 5 seconds to ensure the initial auto-connect has time to resolve first
+                    QTimer.singleShot(5000, lambda: self.tray_app.trigger_performance_mode(checked=True))
                     
         return False, 0
 
@@ -377,7 +380,7 @@ def wifi_signal_color(signal):
     return "#DC2626"          # Red - poor
 
 
-class WiFiPickerDialog(QDialog):
+class _LegacyWiFiPickerDialog(QDialog):
     wifi_chosen = pyqtSignal(str)
 
     def __init__(self, parent=None):
@@ -397,65 +400,76 @@ class WiFiPickerDialog(QDialog):
         self.setMinimumSize(760, 580)
         self.resize(860, 680)
 
+        # Matched directly to styles.css design tokens
         self.setStyleSheet("""
             QDialog {
-                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1,
-                    stop: 0 #2a1b42, stop: 0.5 #1e2247, stop: 1 #121832);
+                background-color: #090b18;
+                font-family: 'Manrope', 'Segoe UI', sans-serif;
             }
-            QLabel { color: #f4f7fb; }
-            QScrollArea { border: none; background: transparent; }
-            QWidget#cardsContainer { background: transparent; }
-            QScrollBar:vertical { width: 9px; background: transparent; margin: 6px; }
-            QScrollBar::handle:vertical { background: rgba(255, 255, 255, 0.2); border-radius: 4px; min-height: 28px; }
+            QLabel { 
+                color: #f4f7fb; 
+            }
+            QScrollArea { 
+                border: none; 
+                background: transparent; 
+            }
+            QWidget#cardsContainer { 
+                background: transparent; 
+            }
+            QScrollBar:vertical { 
+                width: 6px; 
+                background: transparent; 
+                margin: 0px; 
+            }
+            QScrollBar::handle:vertical { 
+                background: rgba(138, 160, 255, 0.3); 
+                border-radius: 3px; 
+                min-height: 28px; 
+            }
+            QScrollBar::handle:vertical:hover { 
+                background: rgba(102, 199, 255, 0.5); 
+            }
+            
+            /* Styled like .button-secondary in styles.css */
             QPushButton#refresh {
-                color: #05111c;
-                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1, stop: 0 #66c7ff, stop: 1 #bb7cff);
-                border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px;
-                font-size: 13px; font-weight: 800; padding: 10px 16px; min-width: 110px;
-            }
-            QPushButton#refresh:hover { background: #82d4ff; }
-            QPushButton#wifiTile, QPushButton#portalTile {
-                text-align: center;
-                border-radius: 14px;
-                padding: 10px;
-                min-height: 156px;
-                min-width: 178px;
-                font-size: 16px;
+                color: #f4f7fb;
+                background-color: rgba(16, 21, 38, 0.74);
+                border: 1px solid rgba(102, 199, 255, 0.22);
+                border-radius: 12px;
+                font-size: 14px; 
                 font-weight: 700;
-                border: 2px solid transparent;
+                padding: 8px 20px; 
             }
-            QPushButton#wifiTile {
-                color: #eff6ff;
-                background: rgba(255, 255, 255, 0.08);
+            QPushButton#refresh:hover { 
+                background-color: rgba(28, 36, 64, 0.9);
+                border-color: rgba(102, 199, 255, 0.5);
             }
-            QPushButton#wifiTile:hover {
-                background: rgba(255, 255, 255, 0.15);
+            QPushButton#refresh:pressed { 
+                background-color: rgba(12, 15, 30, 0.9); 
+                color: #a7b0d6; 
             }
-            QPushButton#portalTile {
-                color: #05111c;
-                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1, stop: 0 #66c7ff, stop: 1 #bb7cff);
+            
+            /* Skeleton loading card matching var(--panel) */
+            QFrame#skeletonTile { 
+                background: rgba(20, 26, 46, 0.6); 
+                border: 1px solid rgba(146, 160, 215, 0.12);
+                border-radius: 16px; 
+                min-height: 80px; 
             }
-            QPushButton#portalTile:hover {
-                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1, stop: 0 #82d4ff, stop: 1 #d39fff);
-            }
-            QFrame#skeletonTile { background: rgba(255, 255, 255, 0.1); border-radius: 14px; min-height: 156px; min-width: 178px; }
         """)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(28, 24, 28, 24)
-        layout.setSpacing(12)
+        layout.setContentsMargins(36, 36, 36, 36)
+        layout.setSpacing(16)
 
-        heading = QLabel("Choose your network")
-        heading.setStyleSheet("font-size: 30px; font-weight: 700; color: #f8fafc;")
+        # Heading matching brand font style
+        heading = QLabel("Wi-Fi")
+        heading.setStyleSheet("font-size: 28px; font-weight: 800; color: #f4f7fb; letter-spacing: -0.03em; padding-bottom: 4px;")
         layout.addWidget(heading)
-
-        subheading = QLabel("Portal networks appear first. Pick a tile to connect.")
-        subheading.setStyleSheet("color: #a7b0d6; font-size: 13px;")
-        layout.addWidget(subheading)
 
         toolbar = QHBoxLayout()
         self.status = QLabel("Scanning nearby networks…")
-        self.status.setStyleSheet("color: #66c7ff; font-weight: 600;")
+        self.status.setStyleSheet("color: #a7b0d6; font-size: 14px;")
         toolbar.addWidget(self.status)
         toolbar.addStretch()
 
@@ -472,9 +486,9 @@ class WiFiPickerDialog(QDialog):
         self.cards.setObjectName("cardsContainer")
 
         self.cards_layout = QGridLayout(self.cards)
-        self.cards_layout.setContentsMargins(14, 14, 14, 14)
-        self.cards_layout.setSpacing(12)
-        self.cards_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self.cards_layout.setContentsMargins(0, 10, 0, 10)
+        self.cards_layout.setSpacing(14)
+        self.cards_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         self.scroll.setWidget(self.cards)
         layout.addWidget(self.scroll, 1)
@@ -490,7 +504,7 @@ class WiFiPickerDialog(QDialog):
         # Trigger first real scan
         self.scan_networks()
 
-    def show_skeleton_loading(self, count=6, columns=3):
+    def show_skeleton_loading(self, count=6, columns=2):
         """Displays temporary wireframe cards with a pulsing opacity animation."""
         self.clear_cards_layout()
         self.skeleton_anims.clear()
@@ -499,20 +513,19 @@ class WiFiPickerDialog(QDialog):
             skeleton = QFrame()
             skeleton.setObjectName("skeletonTile")
             
-            # Setup the pulsing animation
             effect = QGraphicsOpacityEffect(skeleton)
             skeleton.setGraphicsEffect(effect)
             
             anim = QPropertyAnimation(effect, b"opacity")
-            anim.setDuration(1200) # 1.2 seconds per pulse cycle
-            anim.setStartValue(0.3)
-            anim.setKeyValueAt(0.5, 0.8) # Peak brightness halfway through
-            anim.setEndValue(0.3)
+            anim.setDuration(1200)
+            anim.setStartValue(0.25)
+            anim.setKeyValueAt(0.5, 0.75)
+            anim.setEndValue(0.25)
             anim.setEasingCurve(QEasingCurve.Type.InOutSine)
-            anim.setLoopCount(-1) # Loop infinitely
+            anim.setLoopCount(-1)
             anim.start()
             
-            self.skeleton_anims.append(anim) # Keep reference to prevent garbage collection
+            self.skeleton_anims.append(anim)
             
             row = index // columns
             col = index % columns
@@ -536,7 +549,7 @@ class WiFiPickerDialog(QDialog):
 
     def on_scan_failed(self, error):
         self.status.setText(f"Scan failed: {error}")
-        self.status.setStyleSheet("color: #e74c3c; font-weight: 600;")
+        self.status.setStyleSheet("color: #ff7b88; font-size: 14px;")
 
     def on_scan_finished(self, networks):
         portal_networks = []
@@ -554,13 +567,13 @@ class WiFiPickerDialog(QDialog):
         
         current_time = datetime.now().strftime("%I:%M:%S %p")
         self.status.setText(f"Scan complete. Last updated at {current_time}")
-        self.status.setStyleSheet("color: #66c7ff; font-weight: 600;")
+        self.status.setStyleSheet("color: #a7b0d6; font-size: 14px;")
 
-    def update_networks_ui(self, portal_networks, normal_networks, columns=3):
+    def update_networks_ui(self, portal_networks, normal_networks, columns=2):
         combined_networks = [(net, True) for net in portal_networks] + [(net, False) for net in normal_networks]
 
         if not self.initial_scan_done:
-            self.skeleton_anims.clear()  # Stop animations before clearing
+            self.skeleton_anims.clear()
             self.clear_cards_layout()
             self.initial_scan_done = True
 
@@ -574,53 +587,49 @@ class WiFiPickerDialog(QDialog):
                 if index >= len(self.reusable_network_buttons):
                     btn = QPushButton()
                     btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                    btn.setIcon(QIcon(resource_path("wifi.svg")))
-                    btn.setIconSize(QSize(54, 54))
-                    btn.setMinimumHeight(156)
-                    btn.setMinimumWidth(178)
+                    btn.setMinimumHeight(80)
                     self.reusable_network_buttons.append(btn)
                     row = index // columns
                     col = index % columns
                     self.cards_layout.addWidget(btn, row, col)
-                
+
                 btn = self.reusable_network_buttons[index]
-                btn.setText(ssid)
+                btn.setText(f"  {ssid}")
                 btn.setIcon(QIcon(resource_path("wifi.svg")))
-                btn.setIconSize(QSize(54, 54))
+                btn.setIconSize(QSize(32, 32))
+
                 if is_portal:
-                    background_css = (
-                        "qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1, "
-                        "stop: 0 #66c7ff, stop: 1 #bb7cff)"
-                    )
-                    hover_background_css = (
-                        "qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1, "
-                        "stop: 0 #82d4ff, stop: 1 #d39fff)"
-                    )
-                    text_color = "#05111c"
+                    # Inspired by .button-primary (Linear gradient with dark high-contrast text)
+                    background_css = "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #66c7ff, stop:1 #bb7cff)"
+                    hover_background_css = "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #7ad0ff, stop:1 #c78eff)"
+                    pressed_background_css = "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #50b9f0, stop:1 #a86be6)"
+                    text_color = "#06101c"
+                    border_css = f"1px solid rgba(255, 255, 255, 0.3); border-left: 5px solid {signal_color}"
                 else:
-                    background_css = "rgba(255, 255, 255, 0.08)"
-                    hover_background_css = "rgba(255, 255, 255, 0.15)"
-                    text_color = "#eff6ff"
+                    # Inspired by --panel and --line (Dark glass cards)
+                    background_css = "rgba(16, 21, 38, 0.74)"
+                    hover_background_css = "rgba(28, 36, 64, 0.9)"
+                    pressed_background_css = "rgba(12, 15, 30, 0.9)"
+                    text_color = "#f4f7fb"
+                    border_css = f"1px solid rgba(146, 160, 215, 0.18); border-left: 5px solid {signal_color}"
 
                 btn.setStyleSheet(f"""
                     QPushButton {{
                         color: {text_color};
                         background: {background_css};
-                        border: 2px solid {signal_color};
-                        border-radius: 14px;
-                        padding: 12px;
-                        min-height: 156px;
-                        min-width: 178px;
-                        font-size: 16px;
+                        border: {border_css};
+                        border-radius: 16px;
+                        padding: 16px 20px;
+                        font-size: 15px;
                         font-weight: 700;
+                        text-align: left;
                     }}
                     QPushButton:hover {{
                         background: {hover_background_css};
-                        border: 2px solid {signal_color};
+                        border-color: {'rgba(255, 255, 255, 0.5)' if is_portal else 'rgba(102, 199, 255, 0.4)'};
                     }}
                     QPushButton:pressed {{
-                        background: rgba(0, 0, 0, 0.16);
-                        border: 2px solid {signal_color};
+                        background: {pressed_background_css};
                     }}
                 """)
 
@@ -632,21 +641,226 @@ class WiFiPickerDialog(QDialog):
                 btn.clicked.connect(
                     lambda checked=False, target_ssid=ssid: self.connect_to_network(target_ssid)
                 )
-
-                target_id = "portalTile" if is_portal else "wifiTile"
-                btn.setObjectName(target_id)
                 btn.setVisible(True)
-
             else:
                 self.reusable_network_buttons[index].setVisible(False)
 
     def connect_to_network(self, ssid):
         self.is_connecting = True
         self.status.setText(f"Connecting to {ssid}...")
-        self.status.setStyleSheet("color: #f1c40f; font-weight: 600;")
-        
+        self.status.setStyleSheet("color: #66c7ff; font-size: 14px;")
         self.auto_refresh_timer.stop()
+        self.wifi_chosen.emit(ssid)
+        self.accept()
+
+# --- UI: WI-FI Picker ---
+class WiFiPickerDialog(QDialog):
+    """inspired by https://loqin-vit.vercel.app"""
+    wifi_chosen = pyqtSignal(str)
+    portal_pattern = re.compile(r"^(?:VIT|[A-Z]-VIT)$", re.IGNORECASE)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.scan_thread = WiFiScanThread()
+        self.scan_thread.networks_found.connect(self.on_scan_finished)
+        self.scan_thread.scan_failed.connect(self.on_scan_failed)
+        self.is_connecting = False
+        self.initial_scan_done = False
+        self.skeleton_anims = []
+        self.setWindowTitle("Loqin • Wi-Fi")
+        self.setWindowIcon(QIcon(resource_path("loqin_logo_small.png")))
+        self.setMinimumSize(760, 620)
+        self.resize(920, 720)
+        self.setStyleSheet("""
+            QDialog { background: #090b18; color: #f4f7fb; font-family: 'Manrope', 'Segoe UI', sans-serif; }
+            QFrame#topbar { background: rgba(10,13,26,0.86); border: 1px solid rgba(146,160,215,0.18); border-radius: 22px; }
+            QFrame#brandMark { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 rgba(102,199,255,0.18),stop:1 rgba(187,124,255,0.16)); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; }
+            QFrame#heroPanel { background: rgba(10,18,32,0.66); border: 1px solid rgba(146,160,215,0.18); border-radius: 30px; }
+            QLabel { color: #f4f7fb; }
+            QLabel#muted, QLabel#subtext { color: #a7b0d6; }
+            QLabel#eyebrow { color: #a7b0d6; font-size: 11px; font-weight: 800; letter-spacing: 2px; }
+            QLabel#heroTitle { color: #f4f7fb; font-family: 'Space Grotesk', 'Segoe UI', sans-serif; font-size: 34px; font-weight: 700; }
+            QLabel#brandName { color: #f4f7fb; font-family: 'Space Grotesk', 'Segoe UI', sans-serif; font-size: 18px; font-weight: 700; }
+            QLabel#brandCaption { color: #a7b0d6; font-size: 11px; }
+            QLabel#statusPill { color: #e0f4ff; background: rgba(102,199,255,0.08); border: 1px solid rgba(102,199,255,0.18); border-radius: 14px; padding: 8px 12px; }
+            QPushButton#refresh { color: #f4f7fb; background: rgba(16,21,38,0.74); border: 1px solid rgba(102,199,255,0.22); border-radius: 16px; padding: 11px 20px; font-weight: 800; }
+            QPushButton#refresh:hover { background: rgba(28,36,64,0.9); border-color: rgba(102,199,255,0.5); }
+            QPushButton#wifiCard { color: #f4f7fb; background: rgba(16,21,38,0.86); border: 1px solid rgba(146,160,215,0.18); border-radius: 18px; padding: 18px; font-size: 15px; font-weight: 800; text-align: left; }
+            QPushButton#wifiCard:hover { background: rgba(28,36,64,0.9); border-color: rgba(102,199,255,0.5); }
+            QPushButton#portalCard { color: #06101c; background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #66c7ff,stop:1 #bb7cff); border: 1px solid rgba(255,255,255,0.30); border-radius: 18px; padding: 18px; font-size: 15px; font-weight: 800; text-align: left; }
+            QPushButton#portalCard:hover { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #7ad0ff,stop:1 #c78eff); }
+            QScrollArea { border: none; background: transparent; }
+            QWidget#cardsContainer { background: transparent; }
+            QScrollBar:vertical { width: 6px; background: transparent; }
+            QScrollBar::handle:vertical { background: rgba(138,160,255,0.3); border-radius: 3px; min-height: 28px; }
+            QFrame#skeletonTile { background: rgba(20,26,46,0.6); border: 1px solid rgba(146,160,215,0.12); border-radius: 18px; min-height: 94px; }
+        """)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(30, 26, 30, 30)
+        root.setSpacing(18)
+
+        topbar = QFrame()
+        topbar.setObjectName("topbar")
+        top_layout = QHBoxLayout(topbar)
+        top_layout.setContentsMargins(16, 12, 16, 12)
+        mark = QFrame()
+        mark.setObjectName("brandMark")
+        mark.setFixedSize(44, 44)
+        mark_layout = QVBoxLayout(mark)
+        mark_layout.setContentsMargins(8, 8, 8, 8)
+        logo = QLabel()
+        logo.setPixmap(QPixmap(resource_path("loqin_logo_small.png")).scaled(28, 28, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        mark_layout.addWidget(logo)
+        top_layout.addWidget(mark)
+        brand = QVBoxLayout()
+        brand.setSpacing(1)
+        name = QLabel("Loqin")
+        name.setObjectName("brandName")
+        caption = QLabel("PC Wi-Fi Client")
+        caption.setObjectName("brandCaption")
+        brand.addWidget(name)
+        brand.addWidget(caption)
+        top_layout.addLayout(brand)
+        top_layout.addStretch()
+        pill = QLabel("●  Wi-Fi selector")
+        pill.setObjectName("statusPill")
+        top_layout.addWidget(pill)
+        root.addWidget(topbar)
+
+        hero = QFrame()
+        hero.setObjectName("heroPanel")
+        hero_layout = QVBoxLayout(hero)
+        hero_layout.setContentsMargins(26, 24, 26, 24)
+        hero_layout.setSpacing(10)
+        eyebrow = QLabel("NETWORK CONTROL")
+        eyebrow.setObjectName("eyebrow")
+        hero_layout.addWidget(eyebrow)
+        heading = QLabel("Choose your network.")
+        heading.setObjectName("heroTitle")
+        hero_layout.addWidget(heading)
+        subtext = QLabel("Select a nearby Wi-Fi network to connect Loqin and continue in the background.")
+        subtext.setObjectName("subtext")
+        subtext.setWordWrap(True)
+        hero_layout.addWidget(subtext)
+        toolbar = QHBoxLayout()
+        self.status = QLabel("Scanning nearby networks…")
+        self.status.setObjectName("muted")
+        toolbar.addWidget(self.status)
+        toolbar.addStretch()
+        refresh = QPushButton("Refresh")
+        refresh.setObjectName("refresh")
+        refresh.setCursor(Qt.CursorShape.PointingHandCursor)
+        refresh.clicked.connect(self.scan_networks)
+        toolbar.addWidget(refresh)
+        hero_layout.addLayout(toolbar)
+        root.addWidget(hero)
+
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.cards = QWidget()
+        self.cards.setObjectName("cardsContainer")
+        self.cards_layout = QGridLayout(self.cards)
+        self.cards_layout.setContentsMargins(0, 0, 6, 0)
+        self.cards_layout.setSpacing(14)
+        self.cards_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.scroll.setWidget(self.cards)
+        root.addWidget(self.scroll, 1)
+
         
+        self.show_skeleton_loading()
+        self.auto_refresh_timer = QTimer(self)
+        self.auto_refresh_timer.setInterval(5000)
+        self.auto_refresh_timer.timeout.connect(self.scan_networks)
+        self.auto_refresh_timer.start()
+        self.scan_networks()
+
+    def show_skeleton_loading(self, count=6, columns=2):
+        self.clear_cards_layout()
+        self.skeleton_anims.clear()
+        for index in range(count):
+            skeleton = QFrame()
+            skeleton.setObjectName("skeletonTile")
+            effect = QGraphicsOpacityEffect(skeleton)
+            skeleton.setGraphicsEffect(effect)
+            anim = QPropertyAnimation(effect, b"opacity")
+            anim.setDuration(1400)
+            anim.setStartValue(0.28)
+            anim.setKeyValueAt(0.5, 0.75)
+            anim.setEndValue(0.28)
+            anim.setEasingCurve(QEasingCurve.Type.InOutSine)
+            anim.setLoopCount(-1)
+            anim.start()
+            self.skeleton_anims.append(anim)
+            self.cards_layout.addWidget(skeleton, index // columns, index % columns)
+
+    def clear_cards_layout(self):
+        while self.cards_layout.count():
+            item = self.cards_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+    def scan_networks(self):
+        if self.is_connecting or self.scan_thread.isRunning():
+            return
+        if not self.initial_scan_done:
+            self.status.setText("Scanning nearby networks…")
+        self.scan_thread.start()
+
+    def on_scan_failed(self, error):
+        self.status.setText(f"Scan failed: {error}")
+        self.status.setStyleSheet("color: #ff7b88; font-size: 14px;")
+
+    def on_scan_finished(self, networks):
+        networks.sort(key=lambda item: item.get("signal", -100), reverse=True)
+        portal = [net for net in networks if self.portal_pattern.fullmatch(net.get("ssid", "").strip())]
+        normal = [net for net in networks if net not in portal]
+        self.update_networks_ui(portal, normal)
+        self.status.setText(f"{len(networks)} networks found • updated {datetime.now().strftime('%I:%M:%S %p')}")
+        self.status.setStyleSheet("color: #a7b0d6; font-size: 14px;")
+
+    def update_networks_ui(self, portal_networks, normal_networks, columns=2):
+        self.skeleton_anims.clear()
+        self.clear_cards_layout()
+        self.initial_scan_done = True
+
+        # Keep the visual grouping explicit while retaining the website's grid rhythm.
+        groups = []
+        if portal_networks:
+            groups.append(("PORTAL WI-FI", portal_networks, True))
+        if normal_networks:
+            groups.append(("OTHER NETWORKS", normal_networks, False))
+        row = 0
+        for section_name, section_networks, is_portal in groups:
+            section = QLabel(section_name)
+            section.setObjectName("eyebrow")
+            section.setStyleSheet("color: #a7b0d6; font-size: 11px; font-weight: 800; letter-spacing: 2px; padding: 8px 2px 0;")
+            self.cards_layout.addWidget(section, row, 0, 1, columns)
+            row += 1
+            for index, network in enumerate(section_networks):
+                column = index % columns
+                card_row = row + (index // columns)
+                self.add_network_card(network, is_portal, card_row, column)
+            row += (len(section_networks) + columns - 1) // columns
+
+    def add_network_card(self, network, is_portal, row, column):
+        ssid = network.get("ssid", "Unknown")
+        signal = int(network.get("signal", -100))
+        security = "Open network" if not network.get("secured", True) else "Secured network"
+        button = QPushButton(f"{ssid}\n{security}  •  {signal} dBm")
+        button.setObjectName("portalCard" if is_portal else "wifiCard")
+        button.setIcon(QIcon(resource_path("wifi.svg")))
+        button.setIconSize(QSize(30, 30))
+        button.setMinimumHeight(94)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.clicked.connect(lambda checked=False, target=ssid: self.connect_to_network(target))
+        self.cards_layout.addWidget(button, row, column)
+
+    def connect_to_network(self, ssid):
+        self.is_connecting = True
+        self.status.setText(f"Connecting to {ssid}…")
+        self.status.setStyleSheet("color: #66c7ff; font-size: 14px;")
+        self.auto_refresh_timer.stop()
         self.wifi_chosen.emit(ssid)
         self.accept()
 
@@ -708,56 +922,58 @@ class AccountDetailsDialog(QDialog):
         
         self.setWindowTitle("Loqin • Account Management")
         self.setWindowIcon(QIcon(resource_path("loqin_logo_small.png"))) 
-        self.resize(750, 450) 
+        self.resize(860, 560) 
         
         self.setStyleSheet("""
-            QDialog { 
-                background-color: #171A22; 
-            }
-            QLabel {
-                color: #FFFFFF;
-                font-size: 14px;
-            }
-            /* Table Styling */
-            QTableWidget {
-                background-color: #1E222D;
-                color: #DDDDDD;
-                gridline-color: #2C313E;
-                border: 1px solid #2C313E;
-                border-radius: 8px;
-                font-size: 12px;
-            }
-            QHeaderView::section {
-                background-color: #171A22;
-                color: #3da5ff;
-                font-weight: bold;
-                padding: 6px;
-                border: 1px solid #2C313E;
-            }
-            QTableWidget::item { padding: 4px; }
-            
-            /* Tab Styling */
-            QTabWidget::pane { border: 1px solid #2C313E; border-radius: 4px; }
-            QTabBar::tab {
-                background: #1E222D; color: #BBBBBB; padding: 10px 20px; 
-                border: 1px solid #2C313E; border-bottom: none; 
-                border-top-left-radius: 4px; border-top-right-radius: 4px;
-            }
-            QTabBar::tab:selected { background: #171A22; color: #3da5ff; font-weight: bold; }
-            
-            /* Form Styling */
-            QLineEdit {
-                background: #1E222D; color: #FFF; border: 1px solid #2C313E; 
-                border-radius: 4px; padding: 6px; font-size: 14px;
-            }
-            QPushButton {
-                background: #3da5ff; color: #171A22; font-weight: bold; 
-                border-radius: 4px; padding: 8px; font-size: 14px;
-            }
-            QPushButton:hover { background: #2b8ee0; }
+            QDialog { background: #090b18; color: #f4f7fb; font-family: 'Manrope', 'Segoe UI', sans-serif; }
+            QFrame#accountHeader { background: rgba(10,13,26,0.86); border: 1px solid rgba(146,160,215,0.18); border-radius: 22px; }
+            QFrame#accountMark { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 rgba(102,199,255,0.18),stop:1 rgba(187,124,255,0.16)); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; }
+            QLabel { color: #f4f7fb; font-size: 14px; }
+            QTableWidget { background: rgba(16,21,38,0.86); color: #f4f7fb; gridline-color: rgba(146,160,215,0.12); border: 1px solid rgba(146,160,215,0.18); border-radius: 18px; font-size: 12px; selection-background-color: rgba(102,199,255,0.22); selection-color: #f4f7fb; }
+            QHeaderView::section { background: rgba(20,26,46,0.96); color: #a7b0d6; font-weight: 800; padding: 10px 8px; border: none; border-bottom: 1px solid rgba(146,160,215,0.18); }
+            QTableWidget::item { padding: 7px; border: none; }
+            QTabWidget::pane { border: 1px solid rgba(146,160,215,0.18); border-radius: 18px; top: -1px; background: rgba(10,18,32,0.66); }
+            QTabBar::tab { background: rgba(255,255,255,0.03); color: #a7b0d6; padding: 11px 18px; margin-right: 8px; border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; font-weight: 800; }
+            QTabBar::tab:hover { color: #f4f7fb; border-color: rgba(102,199,255,0.3); }
+            QTabBar::tab:selected { color: #f4f7fb; background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 rgba(102,199,255,0.16),stop:1 rgba(187,124,255,0.14)); border-color: rgba(102,199,255,0.3); }
+            QLineEdit { background: rgba(16,21,38,0.86); color: #f4f7fb; border: 1px solid rgba(146,160,215,0.18); border-radius: 12px; padding: 8px 10px; font-size: 14px; }
+            QLineEdit:focus { border-color: rgba(102,199,255,0.65); background: rgba(20,26,46,0.96); }
+            QPushButton { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #66c7ff,stop:1 #bb7cff); color: #06101c; font-weight: 800; border: 1px solid rgba(255,255,255,0.22); border-radius: 14px; padding: 10px 14px; font-size: 14px; }
+            QPushButton:hover { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #7ad0ff,stop:1 #c78eff); }
         """)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 22, 24, 24)
+        layout.setSpacing(16)
+
+        account_header = QFrame()
+        account_header.setObjectName("accountHeader")
+        header_layout = QHBoxLayout(account_header)
+        header_layout.setContentsMargins(16, 14, 16, 14)
+        mark = QFrame()
+        mark.setObjectName("accountMark")
+        mark.setFixedSize(44, 44)
+        mark_layout = QVBoxLayout(mark)
+        mark_layout.setContentsMargins(8, 8, 8, 8)
+        logo = QLabel()
+        logo.setPixmap(QPixmap(resource_path("loqin_logo_small.png")).scaled(28, 28, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        mark_layout.addWidget(logo)
+        header_layout.addWidget(mark)
+        title_layout = QVBoxLayout()
+        title_layout.setSpacing(1)
+        title = QLabel("Account management")
+        title.setStyleSheet("font-family: 'Space Grotesk', 'Segoe UI', sans-serif; font-size: 20px; font-weight: 700; color: #f4f7fb;")
+        subtitle = QLabel("Review your session history or update your portal password.")
+        subtitle.setStyleSheet("color: #a7b0d6; font-size: 12px;")
+        title_layout.addWidget(title)
+        title_layout.addWidget(subtitle)
+        header_layout.addLayout(title_layout)
+        header_layout.addStretch()
+        account_pill = QLabel("Secure account tools")
+        account_pill.setStyleSheet("color: #e0f4ff; background: rgba(102,199,255,0.08); border: 1px solid rgba(102,199,255,0.18); border-radius: 14px; padding: 8px 12px; font-weight: 700;")
+        header_layout.addWidget(account_pill)
+        layout.addWidget(account_header)
+
         self.tabs = QTabWidget(self)
         layout.addWidget(self.tabs)
 
@@ -769,8 +985,8 @@ class AccountDetailsDialog(QDialog):
         self.history_tab = QWidget()
         layout = QVBoxLayout(self.history_tab)
         
-        title = QLabel("<b>Recent Network Sessions</b>")
-        title.setStyleSheet("font-size: 16px; margin-bottom: 5px;")
+        title = QLabel("Recent network sessions")
+        title.setStyleSheet("font-family: 'Space Grotesk', 'Segoe UI', sans-serif; font-size: 18px; font-weight: 700; color: #f4f7fb; margin-bottom: 6px;")
         layout.addWidget(title)
 
         self.table = QTableWidget()
@@ -839,8 +1055,8 @@ class AccountDetailsDialog(QDialog):
         self.password_tab = QWidget()
         layout = QVBoxLayout(self.password_tab)
         
-        title = QLabel("<b>Reset Network Password</b>")
-        title.setStyleSheet("font-size: 16px; margin-bottom: 10px;")
+        title = QLabel("Reset network password")
+        title.setStyleSheet("font-family: 'Space Grotesk', 'Segoe UI', sans-serif; font-size: 18px; font-weight: 700; color: #f4f7fb; margin-bottom: 12px;")
         layout.addWidget(title)
         
         form_layout = QFormLayout()
@@ -851,6 +1067,12 @@ class AccountDetailsDialog(QDialog):
         container_old, self.old_pw_input = self.create_password_field()
         container_new, self.new_pw_input = self.create_password_field()
         container_confirm, self.confirm_pw_input = self.create_password_field()
+        for password_container in (container_old, container_new, container_confirm):
+            password_container.findChild(QPushButton).setStyleSheet("""
+                QPushButton { background: rgba(16,21,38,0.86); color: #a7b0d6; border: 1px solid rgba(146,160,215,0.18); border-radius: 10px; font-size: 14px; }
+                QPushButton:checked { background: #66c7ff; color: #06101c; border-color: #66c7ff; }
+                QPushButton:hover { border-color: #66c7ff; }
+            """)
 
         form_layout.addRow("Current Password:", container_old)
         form_layout.addRow("New Password:", container_new)
@@ -865,15 +1087,17 @@ class AccountDetailsDialog(QDialog):
         forgot_btn.setStyleSheet("""
             QPushButton {
                 background: transparent;
-                color: #3da5ff;
-                border: none;
+                color: #a7b0d6;
+                border: 1px solid rgba(255,255,255,0.12);
+                border-radius: 12px;
                 font-size: 13px;
                 text-align: left;
-                padding-left: 0px;
+                padding: 8px 10px;
             }
             QPushButton:hover {
-                text-decoration: underline;
-                color: #5bb3ff;
+                color: #f4f7fb;
+                border-color: rgba(102,199,255,0.3);
+                background: rgba(255,255,255,0.03);
             }
         """)
         forgot_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://hostelwifi.vit.ac.in/index.php?a=add&category=4")))
@@ -911,13 +1135,13 @@ class AccountDetailsDialog(QDialog):
             self.table.insertRow(total_row)
             
             total_label_item = QTableWidgetItem("Grand Total")
-            total_label_item.setForeground(QColor("#2ecc71")) 
+            total_label_item.setForeground(QColor("#8ff3c8")) 
             total_label_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(total_row, 0, total_label_item)
             
             for col_offset, text in enumerate(grand_total_data):
                 item = QTableWidgetItem(text)
-                item.setForeground(QColor("#2ecc71"))
+                item.setForeground(QColor("#8ff3c8"))
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.table.setItem(total_row, col_offset + 3, item)
                 
@@ -1237,7 +1461,7 @@ class SpeedGraphDialog(QDialog):
 
         self.setWindowTitle("Loqin • Live Network Monitor")
         self.setWindowIcon(QIcon(resource_path("loqin_logo_small.png")))
-        self.resize(720, 420)
+        self.resize(820, 520)
 
         self.download_history = [0] * 60
         self.upload_history = [0] * 60
@@ -1249,36 +1473,30 @@ class SpeedGraphDialog(QDialog):
         header_layout = QHBoxLayout()
 
         title = QLabel("Real-Time Network Usage")
-        title.setStyleSheet("""
-            QLabel{
-                color:white;
-                font-size:18px;
-                font-weight:600;
-            }
-        """)
+        title.setStyleSheet("color: #f4f7fb; font-family: 'Space Grotesk', 'Segoe UI', sans-serif; font-size: 20px; font-weight: 700;")
 
         # Always on top checkbox
         self.pin_checkbox = QCheckBox("Always on Top")
         self.pin_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
         self.pin_checkbox.setStyleSheet("""
             QCheckBox {
-                color: #BBBBBB;
+                color: #a7b0d6;
                 font-size: 13px;
                 font-weight: 500;
             }
             QCheckBox::indicator {
                 width: 14px;
                 height: 14px;
-                border: 1px solid #777777;
-                border-radius: 3px;
-                background: #171A22;
+                border: 1px solid rgba(146,160,215,0.4);
+                border-radius: 5px;
+                background: rgba(255,255,255,0.04);
             }
             QCheckBox::indicator:checked {
-                background: #3da5ff;
-                border: 1px solid #3da5ff;
+                background: #66c7ff;
+                border: 1px solid #66c7ff;
             }
             QCheckBox:hover {
-                color: #FFFFFF;
+                color: #f4f7fb;
             }
         """)
         self.pin_checkbox.toggled.connect(self.toggle_always_on_top)
@@ -1303,24 +1521,17 @@ class SpeedGraphDialog(QDialog):
         self.stats = QLabel()
         self.stats.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self.stats.setStyleSheet("""
-            QLabel{
-                color:#cccccc;
-                font-size:13px;
-            }
-        """)
+        self.stats.setStyleSheet("color: #a7b0d6; font-size: 13px; padding: 8px;")
 
         layout.addWidget(self.stats)
 
         self.setStyleSheet("""
-            QDialog{
-                background:#171A22;
-            }
+            QDialog { background: #090b18; color: #f4f7fb; font-family: 'Manrope', 'Segoe UI', sans-serif; }
         """)
 
         # ---------------- Graph ---------------- #
 
-        self.graph.setBackground("#171A22")
+        self.graph.setBackground("#10162a")
 
         self.graph.showGrid(
             x=True,
@@ -1338,35 +1549,35 @@ class SpeedGraphDialog(QDialog):
 
         self.graph.setDownsampling(mode="peak")
 
-        self.graph.setLabel("left", "Speed (KB/s)", color="#BBBBBB")
+        self.graph.setLabel("left", "Speed (KB/s)", color="#a7b0d6")
 
-        self.graph.setLabel("bottom", "Time", color="#BBBBBB")
+        self.graph.setLabel("bottom", "Time", color="#a7b0d6")
 
-        self.graph.getAxis("left").setPen(pg.mkPen("#777"))
+        self.graph.getAxis("left").setPen(pg.mkPen("#59658a"))
 
-        self.graph.getAxis("bottom").setPen(pg.mkPen("#777"))
+        self.graph.getAxis("bottom").setPen(pg.mkPen("#59658a"))
 
-        self.graph.getAxis("left").setTextPen("#BBBBBB")
+        self.graph.getAxis("left").setTextPen("#a7b0d6")
 
-        self.graph.getAxis("bottom").setTextPen("#BBBBBB")
+        self.graph.getAxis("bottom").setTextPen("#a7b0d6")
 
         self.graph.setYRange(0, 100)
 
         # Download curve
         self.download_curve = self.graph.plot(
-            pen=pg.mkPen("#3da5ff", width=3),
+            pen=pg.mkPen("#66c7ff", width=3),
             name="Download"
         )
 
         # Upload curve
         self.upload_curve = self.graph.plot(
-            pen=pg.mkPen("#2ecc71", width=3),
+            pen=pg.mkPen("#8ff3c8", width=3),
             name="Upload"
         )
 
         legend = self.graph.addLegend()
 
-        legend.setBrush(pg.mkBrush(30, 30, 30, 200))
+        legend.setBrush(pg.mkBrush(20, 26, 46, 220))
 
         legend.setOffset((15, 15))
 
@@ -1428,7 +1639,7 @@ class SpeedGraphDialog(QDialog):
         else:
             self.setWindowTitle("Loqin • Live Network Monitor")
             self.unsetCursor() # Reverts back to standard Windows cursor
-            self.graph.setBackground("#171A22")
+            self.graph.setBackground("#10162a")
             self.download_curve.setPen(pg.mkPen("#3da5ff", width=3))
             self.upload_curve.setPen(pg.mkPen("#2ecc71", width=3))
             self.stats.setStyleSheet("""
@@ -1486,8 +1697,20 @@ class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Loqin for PC - Settings")
-        self.setFixedSize(410, 270)
+        self.setFixedSize(520, 600)
         self.setWindowIcon(QIcon(resource_path("loqin_logo_small.png")))
+        self.setStyleSheet("""
+            QDialog { background: #090b18; color: #f4f7fb; font-family: 'Manrope', 'Segoe UI', sans-serif; }
+            QLabel { color: #a7b0d6; font-size: 13px; }
+            QLineEdit, QSpinBox { color: #f4f7fb; background: rgba(16,21,38,0.86); border: 1px solid rgba(146,160,215,0.18); border-radius: 12px; padding: 9px 11px; min-height: 18px; }
+            QLineEdit:focus, QSpinBox:focus { border-color: rgba(102,199,255,0.65); background: rgba(20,26,46,0.96); }
+            QSpinBox::up-button, QSpinBox::down-button { width: 22px; border: none; background: transparent; }
+            QCheckBox { color: #a7b0d6; font-size: 13px; spacing: 8px; }
+            QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid rgba(146,160,215,0.4); border-radius: 5px; background: rgba(255,255,255,0.04); }
+            QCheckBox::indicator:checked { background: #66c7ff; border-color: #66c7ff; }
+            QPushButton { color: #06101c; background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #66c7ff,stop:1 #bb7cff); border: 1px solid rgba(255,255,255,0.22); border-radius: 14px; padding: 10px 16px; font-weight: 800; }
+            QPushButton:hover { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #7ad0ff,stop:1 #c78eff); }
+        """)
         
         self.config = ConfigManager.load_config()
         self.init_ui()
@@ -1539,13 +1762,13 @@ class SettingsDialog(QDialog):
 
     def init_ui(self):
         layout = QVBoxLayout()
-        layout.setSpacing(4)
-        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(10)
+        layout.setContentsMargins(28, 26, 28, 26)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         logo_label = QLabel()
-        pixmap = QPixmap(resource_path("loqin_logo_small.png"))
-        scaled_pixmap = pixmap.scaled(32, 32, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        pixmap = QPixmap(resource_path("wizard_banner.bmp"))
+        scaled_pixmap = pixmap.scaled(512, 512, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
         logo_label.setPixmap(scaled_pixmap)
         logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(logo_label)
@@ -1557,6 +1780,11 @@ class SettingsDialog(QDialog):
         layout.addWidget(QLabel("Password:"))
         pass_container, self.pass_input = self.create_password_field()
         self.pass_input.setText(ConfigManager.get_password(self.user_input.text()))
+        pass_container.findChild(QPushButton).setStyleSheet("""
+            QPushButton { background: rgba(16,21,38,0.86); color: #a7b0d6; border: 1px solid rgba(146,160,215,0.18); border-radius: 10px; font-size: 14px; }
+            QPushButton:checked { background: #66c7ff; color: #06101c; border-color: #66c7ff; }
+            QPushButton:hover { border-color: #66c7ff; }
+        """)
         layout.addWidget(pass_container)
 
         # Forgot Password Button for Settings Window
@@ -1680,6 +1908,9 @@ class LoqinTrayApp:
 
         self.has_checked_for_updates = False
 
+        # Call during app initialization or initial startup timer
+        QTimer.singleShot(1000, self.check_and_auto_connect)
+
     def build_menu(self):
         self.menu = QMenu()
 
@@ -1741,6 +1972,10 @@ class LoqinTrayApp:
 
         # ---------------- HELP SUBMENU ---------------- #
         help_menu = self.menu.addMenu("Help")
+
+        website_action = QAction("Website", self.menu)
+        website_action.triggered.connect(lambda: QDesktopServices.openUrl(QUrl("https://loqin-vit.vercel.app/")))
+        help_menu.addAction(website_action)
 
         how_to_action = QAction("How to use", self.menu)
         how_to_action.triggered.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/notaayushsrivastava/loqin#readme")))
@@ -2227,7 +2462,7 @@ class LoqinTrayApp:
 
         self.status_action.setText(f"Status: Wi-Fi connected ({ssid})")
         self.status_action.setIcon(create_status_icon("green"))
-        self.tray.setToolTip(f"Loqin - {ssid}")
+        self.tray.setToolTip(f"Loqin - Active")
 
         if self.wifi_picker and self.wifi_picker.isVisible():
             self.wifi_picker.close()
@@ -2255,14 +2490,79 @@ class LoqinTrayApp:
         if self.wifi_picker is None:
             self.wifi_picker = WiFiPickerDialog()
             self.wifi_picker.wifi_chosen.connect(self.on_wifi_chosen)
+            self.wifi_picker.finished.connect(self.wifi_picker.scan_thread.exit)
         else:
+            # The previous picker closes after emitting a selection; make it reusable
+            # when the user opens "Choose Wi-Fi" again from the tray.
+            self.wifi_picker.is_connecting = False
             self.wifi_picker.scan_networks()
         self.wifi_picker.show()
         self.wifi_picker.raise_()
         self.wifi_picker.activateWindow()
 
+    def check_and_auto_connect(self):
+        """
+        Scans for available Wi-Fi networks and checks if the last connected Wi-Fi is in range.
+        """
+        last_ssid = (self.config.get("last_wifi_ssid") or "").strip()
+        current_ssid = get_current_wifi_ssid()
+
+        # if already connected to the target last wifi, just force re-login
+        if current_ssid and last_ssid and current_ssid.lower() == last_ssid.lower():
+            print(f"Already connected to '{current_ssid}'. Performing login...")
+            self.trigger_manual_check()
+            return
+
+        print("Scanning nearby Wi-Fi networks to locate last connected network...")
+        self.tray.setToolTip("Loqin - Scanning for Wi-Fi...")
+        
+        # Run background scan thread
+        self.startup_scan_thread = WiFiScanThread()
+        self.startup_scan_thread.networks_found.connect(self._on_auto_connect_scan_finished)
+        self.startup_scan_thread.scan_failed.connect(lambda err: self.open_wifi_picker())
+        self.startup_scan_thread.start()
+
+    def _on_auto_connect_scan_finished(self, networks):
+        """Callback handling the results of the initial Wi-Fi range check."""
+        last_ssid = (self.config.get("last_wifi_ssid") or "").strip()
+        available_ssids = [net.get("ssid") for net in networks if net.get("ssid")]
+
+        # Check if last_ssid exists and is currently in range
+        if last_ssid and last_ssid in available_ssids:
+            print(f"Last connected Wi-Fi '{last_ssid}' is in range. Auto-connecting...")
+            self.connect_to_wifi(last_ssid, automatic=True)
+        else:
+            print(f"Last connected Wi-Fi '{last_ssid}' is NOT in range. Opening Wi-Fi Picker...")
+            self.open_wifi_picker()
+
     def on_wifi_chosen(self, ssid):
+        """Triggered when a Wi-Fi network is selected from the WiFiPickerDialog."""
+        print(f"Wi-Fi selection changed via picker to: {ssid}")
+        self.save_last_wifi(ssid)
         self.connect_to_wifi(ssid, automatic=False)
+
+    def connect_and_relogin(self, ssid):
+        """Connects to target SSID, waits for interface handshake, drops session, and logs in."""
+        self.tray.setToolTip(f"Loqin - Connecting to {ssid}...")
+        self.status_action.setText(f"Connecting to {ssid}...")
+        
+        # Connect to Wi-Fi network
+        self.connect_to_wifi(ssid, automatic=False)
+
+        # Schedule re-login after giving Windows 4 seconds to assign IP & route traffic
+        QTimer.singleShot(4000, self.force_logout_and_relogin)
+
+    def force_logout_and_relogin(self):
+        """Clears existing portal session and initiates fresh captive portal authentication."""
+        print("Resetting portal session and logging in...")
+        self.tray.setToolTip("Loqin - Re-logging in...")
+        self.status_action.setText("Logging in...")
+        
+        # Drop previous network session (Pronto Networks logout)
+        self.force_logout()
+
+        # Trigger captive portal login sequence through the existing worker flow.
+        QTimer.singleShot(1000, self.trigger_manual_check)
 
     def run(self):
         sys.exit(self.app.exec())
