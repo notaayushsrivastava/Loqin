@@ -1,3 +1,6 @@
+"""
+what have i done
+"""
 import sys
 import json
 import os
@@ -19,11 +22,10 @@ from urllib.parse import urlparse
 from PyQt6.QtWidgets import (
     QApplication, QSystemTrayIcon, QMenu, QDialog, QVBoxLayout, 
     QHBoxLayout, QLabel, QLineEdit, QPushButton, QSpinBox, 
-    QCheckBox, QMessageBox, QDialog, QVBoxLayout, QLabel, QProgressDialog,
-    QDialog, QVBoxLayout, QTextBrowser, QDialogButtonBox, QTableWidget,
-    QHeaderView, QTableWidgetItem, QAbstractItemView, QTabWidget,
-    QWidget, QFormLayout, QScrollArea, QInputDialog, QGridLayout, QFrame,
-    QGraphicsOpacityEffect
+    QCheckBox, QMessageBox, QProgressDialog, QTextBrowser, 
+    QDialogButtonBox, QTableWidget, QHeaderView, QTableWidgetItem, 
+    QAbstractItemView, QTabWidget, QWidget, QFormLayout, QScrollArea, 
+    QGridLayout, QFrame, QGraphicsOpacityEffect
 )
 from PyQt6.QtGui import QIcon, QAction, QPixmap, QColor, QPainter, QDesktopServices, QCursor
 from PyQt6.QtCore import QThread, pyqtSignal, Qt, QTimer, QUrl, QAbstractNativeEventFilter, QPropertyAnimation, QEasingCurve, QSize
@@ -31,7 +33,7 @@ from PyQt6.QtCore import QThread, pyqtSignal, Qt, QTimer, QUrl, QAbstractNativeE
 APP_NAME = "Loqin"
 APPDATA_DIR = os.path.join(os.getenv("APPDATA", os.path.expanduser("~")), "Loqin")
 CONFIG_FILE = os.path.join(APPDATA_DIR, "Loqin_config.json")
-APP_VERSION = "1.6.4"
+APP_VERSION = "1.7.0"
 GITHUB_API_URL = "https://api.github.com/repos/notaayushsrivastava/loqin/releases/latest"
 
 # --- WINDOWS STARTUP REGISTRY HELPER ---
@@ -42,7 +44,7 @@ MUTEX_NAME = "Global\\Loqin_SingleInstance_Mutex_AayushSrivastava"
 
 # --- Windows API Power Broadcast Constants ---
 WM_POWERBROADCAST = 0x0218
-PBT_APMSUSPEND = 0x0004            # System is suspending (Sleep)
+PBT_APMSUSPEND = 0x0004            # System is sleeping
 PBT_APMRESUMEAUTOMATIC = 0x0012    # System resumed automatically
 
 def ensure_single_instance():
@@ -86,7 +88,7 @@ def set_auto_start(enabled: bool):
         print(f"Failed to update registry: {e}")
 
 def is_auto_start_enabled() -> bool:
-    """Check if the registry key currently exists."""
+    """Check if the registry key currently exists"""
     if sys.platform != "win32":
         return False
 
@@ -102,19 +104,35 @@ def is_auto_start_enabled() -> bool:
         return False
 
 def resource_path(relative_path):
-    """Get absolute path to resource, works for dev and PyInstaller"""
+    """Get absolute path to resource converting image assets to .icns on macOS"""
     try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
         base_path = sys._MEIPASS
     except Exception:
-        # In dev mode, the base path is the current working directory
         base_path = os.path.abspath(".")
         
-    # Automatically route all requests through the new 'assets' folder
-    return os.path.join(base_path, "assets", relative_path)
+    full_path = os.path.join(base_path, "assets", relative_path)
+
+    if sys.platform == "darwin":
+        base_name, ext = os.path.splitext(full_path)
+        if ext.lower() in [".png", ".ico", ".jpg", ".jpeg", ".bmp"]:
+            icns_path = f"{base_name}.icns"
+
+            # thats something
+            if not os.path.exists(icns_path) and os.path.exists(full_path):
+                try:
+                    img = Image.open(full_path)
+                    img.save(icns_path, format="ICNS")
+                except Exception as e:
+                    print(f"Failed to convert {relative_path} to .icns: {e}")
+                    return full_path
+            
+            if os.path.exists(icns_path):
+                return icns_path
+
+    return full_path
 
 def create_status_icon(color_type: str) -> QIcon:
-    """Generates a smooth colored circle icon (Green, Yellow, Red) for status indicators."""
+    """Generates a smooth colored circle icon (Green, Yellow, Red) for status indicators"""
     pixmap = QPixmap(16, 16)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
@@ -131,7 +149,6 @@ def create_status_icon(color_type: str) -> QIcon:
     painter.drawEllipse(2, 2, 12, 12)
     painter.end()
     return QIcon(pixmap)
-
 
 class PowerEventFilter(QAbstractNativeEventFilter):
     def __init__(self, tray_app):
@@ -157,7 +174,7 @@ class PowerEventFilter(QAbstractNativeEventFilter):
             if msg.wParam == PBT_APMSUSPEND:
                 if hasattr(self.tray_app, 'worker') and self.tray_app.worker:
                     self.tray_app.worker.is_paused = True
-                self.tray_app.force_logout()
+                self.tray_app.force_logout_and_relogin()
                     
             elif msg.wParam == PBT_APMRESUMEAUTOMATIC:
                 if hasattr(self.tray_app, 'worker') and self.tray_app.worker:
@@ -176,8 +193,7 @@ class PowerEventFilter(QAbstractNativeEventFilter):
                     
         return False, 0
 
-
-# --- WORKER THREAD: Performance Mode Wi-Fi Selector ---
+# --- WORKER THREAD: Performance Mode Wifi Selector ---
 class PerformanceModeThread(QThread):
     status_signal = pyqtSignal(str, str)
 
@@ -258,7 +274,6 @@ class PerformanceModeThread(QThread):
         except Exception as e:
             self.status_signal.emit(f"Wi-Fi Error: {str(e)}", "error")
 
-
 # --- WI-FI HELPERS / AUTO-CONNECT ---
 def get_current_wifi_ssid():
     """Return the currently connected Wi-Fi SSID using Windows WLAN APIs."""
@@ -282,7 +297,6 @@ def get_current_wifi_ssid():
         pass
 
     return ""
-
 
 class WiFiConnectThread(QThread):
     """Connect to a previously saved Windows Wi-Fi profile without blocking the UI."""
@@ -322,7 +336,6 @@ class WiFiConnectThread(QThread):
         except Exception as exc:
             self.failed.emit(str(exc))
 
-
 # --- WI-FI PICKER ---
 class WiFiScanThread(QThread):
     """Keep the (occasionally slow) Windows WLAN scan off the UI thread."""
@@ -357,301 +370,6 @@ class WiFiScanThread(QThread):
             self.networks_found.emit(list(networks.values()))
         except Exception as exc:
             self.scan_failed.emit(str(exc))
-
-
-def wifi_signal_color(signal):
-    """Map Wi-Fi RSSI (dBm) to a connection-quality border color."""
-    try:
-        signal = int(signal)
-    except (TypeError, ValueError):
-        signal = -100
-
-    # Excellent -> Poor. RSSI is normally a negative dBm value.
-    if signal >= -50:
-        return "#14532D"      # Dark green - excellent
-    if signal >= -60:
-        return "#16A34A"      # Green - very good
-    if signal >= -67:
-        return "#84CC16"      # Lime - good
-    if signal >= -75:
-        return "#EAB308"      # Yellow - fair
-    if signal >= -85:
-        return "#F97316"      # Orange - weak
-    return "#DC2626"          # Red - poor
-
-
-class _LegacyWiFiPickerDialog(QDialog):
-    wifi_chosen = pyqtSignal(str)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        
-        # Initialize the background scan thread
-        self.scan_thread = WiFiScanThread()
-        self.scan_thread.networks_found.connect(self.on_scan_finished)
-        self.scan_thread.scan_failed.connect(self.on_scan_failed)
-        
-        self.is_connecting = False
-        self.initial_scan_done = False
-        self.reusable_network_buttons = []
-        self.skeleton_anims = [] # Keep animation references alive
-
-        self.setWindowTitle("Loqin • Choose Wi-Fi")
-        self.setMinimumSize(760, 580)
-        self.resize(860, 680)
-
-        # Matched directly to styles.css design tokens
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #090b18;
-                font-family: 'Manrope', 'Segoe UI', sans-serif;
-            }
-            QLabel { 
-                color: #f4f7fb; 
-            }
-            QScrollArea { 
-                border: none; 
-                background: transparent; 
-            }
-            QWidget#cardsContainer { 
-                background: transparent; 
-            }
-            QScrollBar:vertical { 
-                width: 6px; 
-                background: transparent; 
-                margin: 0px; 
-            }
-            QScrollBar::handle:vertical { 
-                background: rgba(138, 160, 255, 0.3); 
-                border-radius: 3px; 
-                min-height: 28px; 
-            }
-            QScrollBar::handle:vertical:hover { 
-                background: rgba(102, 199, 255, 0.5); 
-            }
-            
-            /* Styled like .button-secondary in styles.css */
-            QPushButton#refresh {
-                color: #f4f7fb;
-                background-color: rgba(16, 21, 38, 0.74);
-                border: 1px solid rgba(102, 199, 255, 0.22);
-                border-radius: 12px;
-                font-size: 14px; 
-                font-weight: 700;
-                padding: 8px 20px; 
-            }
-            QPushButton#refresh:hover { 
-                background-color: rgba(28, 36, 64, 0.9);
-                border-color: rgba(102, 199, 255, 0.5);
-            }
-            QPushButton#refresh:pressed { 
-                background-color: rgba(12, 15, 30, 0.9); 
-                color: #a7b0d6; 
-            }
-            
-            /* Skeleton loading card matching var(--panel) */
-            QFrame#skeletonTile { 
-                background: rgba(20, 26, 46, 0.6); 
-                border: 1px solid rgba(146, 160, 215, 0.12);
-                border-radius: 16px; 
-                min-height: 80px; 
-            }
-        """)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(36, 36, 36, 36)
-        layout.setSpacing(16)
-
-        # Heading matching brand font style
-        heading = QLabel("Wi-Fi")
-        heading.setStyleSheet("font-size: 28px; font-weight: 800; color: #f4f7fb; letter-spacing: -0.03em; padding-bottom: 4px;")
-        layout.addWidget(heading)
-
-        toolbar = QHBoxLayout()
-        self.status = QLabel("Scanning nearby networks…")
-        self.status.setStyleSheet("color: #a7b0d6; font-size: 14px;")
-        toolbar.addWidget(self.status)
-        toolbar.addStretch()
-
-        refresh = QPushButton("Refresh")
-        refresh.setObjectName("refresh")
-        refresh.setCursor(Qt.CursorShape.PointingHandCursor)
-        refresh.clicked.connect(self.scan_networks)
-        toolbar.addWidget(refresh)
-        layout.addLayout(toolbar)
-
-        self.scroll = QScrollArea()
-        self.scroll.setWidgetResizable(True)
-        self.cards = QWidget()
-        self.cards.setObjectName("cardsContainer")
-
-        self.cards_layout = QGridLayout(self.cards)
-        self.cards_layout.setContentsMargins(0, 10, 0, 10)
-        self.cards_layout.setSpacing(14)
-        self.cards_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-
-        self.scroll.setWidget(self.cards)
-        layout.addWidget(self.scroll, 1)
-
-        self.show_skeleton_loading()
-
-        # Set up a silent 5-second auto-refresher
-        self.auto_refresh_timer = QTimer(self)
-        self.auto_refresh_timer.setInterval(5000)
-        self.auto_refresh_timer.timeout.connect(self.scan_networks)
-        self.auto_refresh_timer.start()
-
-        # Trigger first real scan
-        self.scan_networks()
-
-    def show_skeleton_loading(self, count=6, columns=2):
-        """Displays temporary wireframe cards with a pulsing opacity animation."""
-        self.clear_cards_layout()
-        self.skeleton_anims.clear()
-        
-        for index in range(count):
-            skeleton = QFrame()
-            skeleton.setObjectName("skeletonTile")
-            
-            effect = QGraphicsOpacityEffect(skeleton)
-            skeleton.setGraphicsEffect(effect)
-            
-            anim = QPropertyAnimation(effect, b"opacity")
-            anim.setDuration(1200)
-            anim.setStartValue(0.25)
-            anim.setKeyValueAt(0.5, 0.75)
-            anim.setEndValue(0.25)
-            anim.setEasingCurve(QEasingCurve.Type.InOutSine)
-            anim.setLoopCount(-1)
-            anim.start()
-            
-            self.skeleton_anims.append(anim)
-            
-            row = index // columns
-            col = index % columns
-            self.cards_layout.addWidget(skeleton, row, col)
-
-    def clear_cards_layout(self):
-        """Helper to clear the grid layout completely."""
-        while self.cards_layout.count():
-            item = self.cards_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-
-    def scan_networks(self):
-        if self.is_connecting or self.scan_thread.isRunning():
-            return
-            
-        if not self.initial_scan_done:
-            self.status.setText("Scanning nearby networks…")
-            
-        self.scan_thread.start()
-
-    def on_scan_failed(self, error):
-        self.status.setText(f"Scan failed: {error}")
-        self.status.setStyleSheet("color: #ff7b88; font-size: 14px;")
-
-    def on_scan_finished(self, networks):
-        portal_networks = []
-        normal_networks = []
-        
-        networks.sort(key=lambda x: x['signal'], reverse=True)
-        
-        for net in networks:
-            if not net.get('secured', True):
-                portal_networks.append(net)
-            else:
-                normal_networks.append(net)
-                
-        self.update_networks_ui(portal_networks, normal_networks)
-        
-        current_time = datetime.now().strftime("%I:%M:%S %p")
-        self.status.setText(f"Scan complete. Last updated at {current_time}")
-        self.status.setStyleSheet("color: #a7b0d6; font-size: 14px;")
-
-    def update_networks_ui(self, portal_networks, normal_networks, columns=2):
-        combined_networks = [(net, True) for net in portal_networks] + [(net, False) for net in normal_networks]
-
-        if not self.initial_scan_done:
-            self.skeleton_anims.clear()
-            self.clear_cards_layout()
-            self.initial_scan_done = True
-
-        for index in range(max(len(combined_networks), len(self.reusable_network_buttons))):
-            if index < len(combined_networks):
-                network_data, is_portal = combined_networks[index]
-                ssid = network_data.get("ssid", "Unknown") if isinstance(network_data, dict) else str(network_data)
-                signal = int(network_data.get("signal", -100)) if isinstance(network_data, dict) else -100
-                signal_color = wifi_signal_color(signal)
-
-                if index >= len(self.reusable_network_buttons):
-                    btn = QPushButton()
-                    btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                    btn.setMinimumHeight(80)
-                    self.reusable_network_buttons.append(btn)
-                    row = index // columns
-                    col = index % columns
-                    self.cards_layout.addWidget(btn, row, col)
-
-                btn = self.reusable_network_buttons[index]
-                btn.setText(f"  {ssid}")
-                btn.setIcon(QIcon(resource_path("wifi.svg")))
-                btn.setIconSize(QSize(32, 32))
-
-                if is_portal:
-                    # Inspired by .button-primary (Linear gradient with dark high-contrast text)
-                    background_css = "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #66c7ff, stop:1 #bb7cff)"
-                    hover_background_css = "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #7ad0ff, stop:1 #c78eff)"
-                    pressed_background_css = "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #50b9f0, stop:1 #a86be6)"
-                    text_color = "#06101c"
-                    border_css = f"1px solid rgba(255, 255, 255, 0.3); border-left: 5px solid {signal_color}"
-                else:
-                    # Inspired by --panel and --line (Dark glass cards)
-                    background_css = "rgba(16, 21, 38, 0.74)"
-                    hover_background_css = "rgba(28, 36, 64, 0.9)"
-                    pressed_background_css = "rgba(12, 15, 30, 0.9)"
-                    text_color = "#f4f7fb"
-                    border_css = f"1px solid rgba(146, 160, 215, 0.18); border-left: 5px solid {signal_color}"
-
-                btn.setStyleSheet(f"""
-                    QPushButton {{
-                        color: {text_color};
-                        background: {background_css};
-                        border: {border_css};
-                        border-radius: 16px;
-                        padding: 16px 20px;
-                        font-size: 15px;
-                        font-weight: 700;
-                        text-align: left;
-                    }}
-                    QPushButton:hover {{
-                        background: {hover_background_css};
-                        border-color: {'rgba(255, 255, 255, 0.5)' if is_portal else 'rgba(102, 199, 255, 0.4)'};
-                    }}
-                    QPushButton:pressed {{
-                        background: {pressed_background_css};
-                    }}
-                """)
-
-                try:
-                    btn.clicked.disconnect()
-                except TypeError:
-                    pass
-
-                btn.clicked.connect(
-                    lambda checked=False, target_ssid=ssid: self.connect_to_network(target_ssid)
-                )
-                btn.setVisible(True)
-            else:
-                self.reusable_network_buttons[index].setVisible(False)
-
-    def connect_to_network(self, ssid):
-        self.is_connecting = True
-        self.status.setText(f"Connecting to {ssid}...")
-        self.status.setStyleSheet("color: #66c7ff; font-size: 14px;")
-        self.auto_refresh_timer.stop()
-        self.wifi_chosen.emit(ssid)
-        self.accept()
 
 # --- UI: WI-FI Picker ---
 class WiFiPickerDialog(QDialog):
@@ -730,28 +448,35 @@ class WiFiPickerDialog(QDialog):
 
         hero = QFrame()
         hero.setObjectName("heroPanel")
+
         hero_layout = QVBoxLayout(hero)
         hero_layout.setContentsMargins(26, 24, 26, 24)
         hero_layout.setSpacing(10)
+
         eyebrow = QLabel("NETWORK CONTROL")
         eyebrow.setObjectName("eyebrow")
         hero_layout.addWidget(eyebrow)
+
         heading = QLabel("Choose your network.")
         heading.setObjectName("heroTitle")
         hero_layout.addWidget(heading)
+
         subtext = QLabel("Select a nearby Wi-Fi network to connect Loqin and continue in the background.")
         subtext.setObjectName("subtext")
         subtext.setWordWrap(True)
         hero_layout.addWidget(subtext)
+
         toolbar = QHBoxLayout()
         self.status = QLabel("Scanning nearby networks…")
         self.status.setObjectName("muted")
         toolbar.addWidget(self.status)
         toolbar.addStretch()
+
         refresh = QPushButton("Refresh")
         refresh.setObjectName("refresh")
         refresh.setCursor(Qt.CursorShape.PointingHandCursor)
         refresh.clicked.connect(self.scan_networks)
+
         toolbar.addWidget(refresh)
         hero_layout.addLayout(toolbar)
         root.addWidget(hero)
@@ -767,7 +492,6 @@ class WiFiPickerDialog(QDialog):
         self.scroll.setWidget(self.cards)
         root.addWidget(self.scroll, 1)
 
-        
         self.show_skeleton_loading()
         self.auto_refresh_timer = QTimer(self)
         self.auto_refresh_timer.setInterval(5000)
@@ -824,7 +548,6 @@ class WiFiPickerDialog(QDialog):
         self.clear_cards_layout()
         self.initial_scan_done = True
 
-        # Keep the visual grouping explicit while retaining the website's grid rhythm.
         groups = []
         if portal_networks:
             groups.append(("PORTAL WI-FI", portal_networks, True))
@@ -861,6 +584,11 @@ class WiFiPickerDialog(QDialog):
         self.status.setText(f"Connecting to {ssid}…")
         self.status.setStyleSheet("color: #66c7ff; font-size: 14px;")
         self.auto_refresh_timer.stop()
+        
+        # --- FIX: Prevent the background scan thread from interrupting our connection attempt ---
+        if self.scan_thread.isRunning():
+            self.scan_thread.wait()
+
         self.wifi_chosen.emit(ssid)
         self.accept()
 
@@ -889,7 +617,10 @@ class UpdateChecker(QThread):
                     latest_v = tuple(map(int, latest_version_tag.split('.')))
                     
                     if latest_v > current_v:
-                        download_url = "https://raw.githubusercontent.com/notaayushsrivastava/Loqin/master/Output/Install_Loqin_Update.exe"
+                        if sys.platform=='win32':
+                            download_url = "https://raw.githubusercontent.com/notaayushsrivastava/Loqin/master/Output/Install_Loqin_Update.exe"
+                        else:
+                            download_url = "https://raw.githubusercontent.com/notaayushsrivastava/Loqin/master/Output/Install_Loqin_macOS.dmg"
                         
                         self.update_found.emit(
                             latest_version_tag, 
@@ -899,7 +630,6 @@ class UpdateChecker(QThread):
                     else:
                         self.no_update_found.emit()
                         
-                    # Exit the thread successfully
                     return 
                     
             except requests.exceptions.SSLError:
@@ -908,13 +638,11 @@ class UpdateChecker(QThread):
                 
             except Exception as e:
                 print(f"Update check failed due to network error: {e}")
-                # For non-SSL errors (like no connection at all), abort entirely
                 return 
                 
         print("Update check aborted: Captive portal is persistently intercepting HTTPS traffic.")
 
 class AccountDetailsDialog(QDialog):
-    # Notice we now pass username and account_url into the dialog
     def __init__(self, username, account_url, parent=None):
         super().__init__(parent)
         self.username = username
@@ -977,7 +705,6 @@ class AccountDetailsDialog(QDialog):
         self.tabs = QTabWidget(self)
         layout.addWidget(self.tabs)
 
-        # Build Tabs
         self.setup_history_tab()
         self.setup_password_tab()
 
@@ -1080,7 +807,6 @@ class AccountDetailsDialog(QDialog):
         
         layout.addLayout(form_layout)
         
-        # Forgot Password Button
         forgot_btn = QPushButton("Forgot Password?")
         forgot_btn.setFixedWidth(287)
         forgot_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1106,7 +832,6 @@ class AccountDetailsDialog(QDialog):
         self.update_btn.setFixedWidth(287)
         self.update_btn.clicked.connect(self.submit_password_change)
         
-        # Group buttons under form layout
         btn_layout = QVBoxLayout()
         btn_layout.setSpacing(6)
         btn_layout.addWidget(self.update_btn)
@@ -1168,11 +893,9 @@ class AccountDetailsDialog(QDialog):
         QApplication.processEvents()
 
         try:
-            # Dynamically parse the IP (e.g., http://136.233.9.110) from the valid session URL
             parsed = urlparse(self.account_url)
             base_url = f"{parsed.scheme}://{parsed.netloc}"
 
-            # Use a Session to capture the JSESSIONID cookie automatically
             session = requests.Session()
             session.get(f"{base_url}/registration/main.do?content_key=%2FChangePassword.jsp", timeout=5)
 
@@ -1190,15 +913,9 @@ class AccountDetailsDialog(QDialog):
 
             response = session.post(f"{base_url}/registration/changePassword.do", data=payload, headers=headers, timeout=5)
 
-            # Pronto generally returns 200 OK whether it succeeds or fails, so we ensure it went through
             if response.status_code == 200:
                 self.status_label.setStyleSheet("color: #2ecc71; margin-left: 120px; font-weight: bold;")
                 self.status_label.setText("Success! Password updated.")
-                
-                # IMPORTANT: Update your local config file immediately so the app doesn't break
-                # Assuming your config manager has a method like this:
-                # ConfigManager.save_config({"username": self.username}, new_pw)
-
                 keyring.set_password(APP_NAME, self.username, new_pw)
                 
             else:
@@ -1221,7 +938,6 @@ class UpdateDownloader(QThread):
 
     def run(self):
         try:
-            # No token needed here either!
             res = requests.get(self.url, stream=True, timeout=15, allow_redirects=True)
             res.raise_for_status() 
             
@@ -1252,20 +968,16 @@ class ReleaseNotesDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
-        # Header Text Widget
         header_label = QLabel(f"<h3>A new version ({version}) of Loqin is available!</h3>")
         layout.addWidget(header_label)
 
-        # Release Notes Display
         self.text_browser = QTextBrowser()
         self.text_browser.setOpenExternalLinks(True)
         
-        # Format release notes markdown
         markdown_content = f"**Release Notes:**\n\n{notes}"
         self.text_browser.setMarkdown(markdown_content)
         layout.addWidget(self.text_browser)
 
-        # Action Buttons
         button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Yes | QDialogButtonBox.StandardButton.No
         )
@@ -1302,28 +1014,21 @@ class ConfigManager:
                     loaded_data = json.load(f)
                     default_config.update(loaded_data)
                     
-                    # --- SECURITY MIGRATION ---
-                    # If the Inno Setup installer left a plain-text password in the JSON,
-                    # we secure it into the OS keyring and delete it from the JSON.
                     if "password" in loaded_data:
                         pwd = loaded_data["password"]
                         if pwd and default_config["username"]:
                             ConfigManager.set_password(default_config["username"], pwd)
                         
-                        # Remove password from the active config dictionary
                         if "password" in default_config:
                             del default_config["password"]
                         
-                        # Flag the file to be overwritten without the password
                         config_needs_saving = True
                         
             except Exception:
                 pass
         else:
-            # File doesn't exist yet, we need to create it
             config_needs_saving = True
 
-        # Save config if it's a first run OR if we just scrubbed the password
         if config_needs_saving:
             ConfigManager.save_config(default_config)
             
@@ -1333,7 +1038,6 @@ class ConfigManager:
     def save_config(config):
         ConfigManager.ensure_dir_exists()
         
-        # Double-check that we never accidentally save a password in plain text
         clean_config = config.copy()
         if "password" in clean_config:
             del clean_config["password"]
@@ -1355,7 +1059,6 @@ class ConfigManager:
         if username:
             keyring.set_password(APP_NAME, username, password)
 
-
 # --- WORKER THREAD: Non-blocking Network Ping & Login ---
 class NetworkWorker(QThread):
     status_signal = pyqtSignal(str, str)
@@ -1366,6 +1069,26 @@ class NetworkWorker(QThread):
         self.config = config
         self.is_running = True
         self.is_paused = False
+
+    @staticmethod
+    def extract_account_url(html_content: str):
+        """Try several possible portal response patterns so account details work even with slight HTML changes."""
+        if not html_content:
+            return ""
+
+        patterns = [
+            r'https?://(?:\d{1,3}\.){3}\d+/[^\"\'\s]*?/registration/Main\.jsp\?sessionId=[^\"\'\s]+',
+            r'https?://(?:\d{1,3}\.){3}\d+/registration/Main\.jsp\?sessionId=[^\"\'\s]+',
+            r'href=[\"\'](https?://[^\"\'\s]+/registration/Main\.jsp\?sessionId=[^\"\'\s]+)[\"\']',
+            r'(https?://[^\"\'\s]+/registration/Main\.jsp\?sessionId=[^\"\'\s]+)',
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, html_content, re.IGNORECASE)
+            if match:
+                return match.group(1) if match.groups() else match.group(0)
+
+        return ""
 
     def check_network_state(self):
         try:
@@ -1379,11 +1102,10 @@ class NetworkWorker(QThread):
 
     def run(self):
         while self.is_running:
-            # --- 2. Add this pause check ---
             if self.is_paused:
-                self.sleep(1) # Sleep briefly so we don't hog the CPU while paused
-                continue      # Skip the rest of the loop and check again
-            # -------------------------------
+                self.sleep(1) 
+                continue      
+                
             username = self.config.get("username")
             password = ConfigManager.get_password(username)
 
@@ -1430,22 +1152,20 @@ class NetworkWorker(QThread):
             response = requests.post(auth_url, data=payload, headers=headers, timeout=5)
             if self.check_network_state() == "ONLINE":
                 self.status_signal.emit("Logged in successfully!", "green")
-                html_content = response.text 
+                html_content = response.text
 
-                # This regex finds the link, capturing both the FULL URL (Group 1) and just the IP (Group 2)
-                match = re.search(r'href="(http://([0-9\.]+)/registration/Main\.jsp\?sessionId=[^"]+)"', html_content)
+                account_url = self.extract_account_url(html_content)
+                if not account_url:
+                    for prior_response in getattr(response, "history", []):
+                        if prior_response and prior_response.url and "registration/Main.jsp" in prior_response.url:
+                            account_url = prior_response.url
+                            break
+                if not account_url and response.url and "registration/Main.jsp" in response.url:
+                    account_url = response.url
 
-                if match:
-                    full_account_url = match.group(1) 
-                    # Example: http://136.233.9.110/registration/Main.jsp?sessionId=1785581532416&wispId=1
-                    
-                    portal_ip = match.group(2)        
-                    # Example: 136.233.9.110
-
-                    print(f"Extracted IP: {portal_ip}")
-                    
-                    # Emit the full URL to the main thread so your account dialog can scrape it
-                    self.account_data_signal.emit(full_account_url)
+                if account_url:
+                    print(f"Extracted account URL: {account_url}")
+                    self.account_data_signal.emit(account_url)
                 else:
                     print("Could not find the account link in the response HTML.")
             else:
@@ -1453,7 +1173,6 @@ class NetworkWorker(QThread):
         except Exception as e:
             print(e)
             self.status_signal.emit("Portal timeout or error.", "error")
-
 
 class SpeedGraphDialog(QDialog):
     def __init__(self, parent=None):
@@ -1469,13 +1188,11 @@ class SpeedGraphDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(15, 15, 15, 15)
 
-        # ---------------- Header Bar ---------------- #
         header_layout = QHBoxLayout()
 
         title = QLabel("Real-Time Network Usage")
         title.setStyleSheet("color: #f4f7fb; font-family: 'Space Grotesk', 'Segoe UI', sans-serif; font-size: 20px; font-weight: 700;")
 
-        # Always on top checkbox
         self.pin_checkbox = QCheckBox("Always on Top")
         self.pin_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
         self.pin_checkbox.setStyleSheet("""
@@ -1501,12 +1218,10 @@ class SpeedGraphDialog(QDialog):
         """)
         self.pin_checkbox.toggled.connect(self.toggle_always_on_top)
 
-        # --- NYAN CAT EASTER EGG TRACKERS ---
         self.secret_code = "nyan"
         self.code_index = 0
         self.nyan_mode = False
 
-        # Centers the title while pushing the pin checkbox to the far right
         header_layout.addStretch()
         header_layout.addWidget(title)
         header_layout.addStretch()
@@ -1520,65 +1235,39 @@ class SpeedGraphDialog(QDialog):
 
         self.stats = QLabel()
         self.stats.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
         self.stats.setStyleSheet("color: #a7b0d6; font-size: 13px; padding: 8px;")
-
         layout.addWidget(self.stats)
 
         self.setStyleSheet("""
             QDialog { background: #090b18; color: #f4f7fb; font-family: 'Manrope', 'Segoe UI', sans-serif; }
         """)
 
-        # ---------------- Graph ---------------- #
-
         self.graph.setBackground("#10162a")
-
-        self.graph.showGrid(
-            x=True,
-            y=True,
-            alpha=0.25
-        )
-
+        self.graph.showGrid(x=True, y=True, alpha=0.25)
         self.graph.hideButtons()
-
         self.graph.setMouseEnabled(False, False)
-
         self.graph.setMenuEnabled(False)
-
         self.graph.setClipToView(True)
-
         self.graph.setDownsampling(mode="peak")
-
         self.graph.setLabel("left", "Speed (KB/s)", color="#a7b0d6")
-
         self.graph.setLabel("bottom", "Time", color="#a7b0d6")
-
         self.graph.getAxis("left").setPen(pg.mkPen("#59658a"))
-
         self.graph.getAxis("bottom").setPen(pg.mkPen("#59658a"))
-
         self.graph.getAxis("left").setTextPen("#a7b0d6")
-
         self.graph.getAxis("bottom").setTextPen("#a7b0d6")
-
         self.graph.setYRange(0, 100)
 
-        # Download curve
         self.download_curve = self.graph.plot(
             pen=pg.mkPen("#66c7ff", width=3),
             name="Download"
         )
-
-        # Upload curve
         self.upload_curve = self.graph.plot(
             pen=pg.mkPen("#8ff3c8", width=3),
             name="Upload"
         )
 
         legend = self.graph.addLegend()
-
         legend.setBrush(pg.mkBrush(20, 26, 46, 220))
-
         legend.setOffset((15, 15))
 
     def keyPressEvent(self, event):
@@ -1599,29 +1288,24 @@ class SpeedGraphDialog(QDialog):
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
 
-        # 1. Rainbow Trail (left side)
         rainbow_colors = ["#FF0000", "#FF7F00", "#FFFF00", "#00FF00", "#0099FF", "#8B00FF"]
         for i, color in enumerate(rainbow_colors):
             painter.fillRect(0, 10 + (i * 2), 12, 2, QColor(color))
 
-        # 2. Pop-Tart Body (center)
-        painter.fillRect(12, 9, 14, 14, QColor("#FFD1DC"))  # Biscuit Crust
-        painter.fillRect(13, 10, 12, 12, QColor("#FF69B4")) # Pink Frosting
-        # Frosting Sprinkles
+        painter.fillRect(12, 9, 14, 14, QColor("#FFD1DC"))  
+        painter.fillRect(13, 10, 12, 12, QColor("#FF69B4")) 
         painter.fillRect(15, 12, 2, 2, QColor("#FF007F"))
         painter.fillRect(20, 15, 2, 2, QColor("#FF007F"))
         painter.fillRect(16, 18, 2, 2, QColor("#FF007F"))
 
-        # 3. Cat Head & Ears (right side)
-        painter.fillRect(22, 13, 9, 8, QColor("#999999"))   # Head Base
-        painter.fillRect(23, 10, 2, 3, QColor("#999999"))   # Left Ear
-        painter.fillRect(28, 10, 2, 3, QColor("#999999"))   # Right Ear
-        painter.fillRect(24, 15, 2, 2, QColor("#000000"))   # Left Eye
-        painter.fillRect(28, 15, 2, 2, QColor("#000000"))   # Right Eye
-        painter.fillRect(26, 18, 2, 1, QColor("#FFB6C1"))   # Cheek
+        painter.fillRect(22, 13, 9, 8, QColor("#999999"))   
+        painter.fillRect(23, 10, 2, 3, QColor("#999999"))   
+        painter.fillRect(28, 10, 2, 3, QColor("#999999"))   
+        painter.fillRect(24, 15, 2, 2, QColor("#000000"))   
+        painter.fillRect(28, 15, 2, 2, QColor("#000000"))   
+        painter.fillRect(26, 18, 2, 1, QColor("#FFB6C1"))   
 
         painter.end()
-        # Set hotspot near the cat's nose
         return QCursor(pixmap, 26, 15)
 
     def toggle_nyan_mode(self):
@@ -1630,15 +1314,15 @@ class SpeedGraphDialog(QDialog):
         if self.nyan_mode:
             self.setWindowTitle("Loqin • Nyan Cat Mode!")
             self.setCursor(self.generate_nyan_cursor())
-            self.graph.setBackground("#0F051D") # Deep space background
-            self.download_curve.setPen(pg.mkPen("#FF69B4", width=3)) # Hot pink
-            self.upload_curve.setPen(pg.mkPen("#00FFFF", width=3))   # Electric cyan
+            self.graph.setBackground("#0F051D") 
+            self.download_curve.setPen(pg.mkPen("#FF69B4", width=3)) 
+            self.upload_curve.setPen(pg.mkPen("#00FFFF", width=3))   
             self.stats.setStyleSheet("""
                 QLabel{ color:#FFD1DC; font-size:13px; font-weight: bold; }
             """)
         else:
             self.setWindowTitle("Loqin • Live Network Monitor")
-            self.unsetCursor() # Reverts back to standard Windows cursor
+            self.unsetCursor() 
             self.graph.setBackground("#10162a")
             self.download_curve.setPen(pg.mkPen("#3da5ff", width=3))
             self.upload_curve.setPen(pg.mkPen("#2ecc71", width=3))
@@ -1655,7 +1339,6 @@ class SpeedGraphDialog(QDialog):
         else:
             self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowStaysOnTopHint)
 
-        # Qt hides windows briefly when modifying flags, re-show if open
         if was_visible:
             self.show()
 
@@ -1677,9 +1360,7 @@ class SpeedGraphDialog(QDialog):
         )
 
         self.graph.setYRange(0, maximum * 1.15)
-
         self.download_curve.setData(self.download_history)
-
         self.upload_curve.setData(self.upload_history)
 
         self.stats.setText(
@@ -1787,7 +1468,6 @@ class SettingsDialog(QDialog):
         """)
         layout.addWidget(pass_container)
 
-        # Forgot Password Button for Settings Window
         forgot_settings_btn = QPushButton("Forgot Password?")
         forgot_settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         forgot_settings_btn.setStyleSheet("""
@@ -1858,17 +1538,14 @@ class LoqinTrayApp:
         self.power_filter = PowerEventFilter(self)
         self.app.installNativeEventFilter(self.power_filter)
 
-        # Load both icons using the resource_path function
         self.default_icon = QIcon(resource_path("loqin_logo_small.png"))
         self.perf_icon = QIcon(resource_path("loqin_logo_performance.png")) 
         
-        # Set the default icon on startup
         self.icon = self.default_icon 
         self.tray = QSystemTrayIcon()
         self.tray.setIcon(self.default_icon) 
         self.tray.setVisible(True)
         
-        # --- FIX 2: Pass self.icon instead of MessageIcon.Information ---
         self.tray.showMessage(
             "Loqin", 
             "Loqin has started! Monitoring your connection in the background.", 
@@ -1878,7 +1555,6 @@ class LoqinTrayApp:
 
         self.config = ConfigManager.load_config()
         
-        # Bandwidth Tracking Metrics setup
         self.last_net_io = psutil.net_io_counters()
         self.last_time = time.time()
         
@@ -1889,6 +1565,8 @@ class LoqinTrayApp:
         self.waiting_for_wifi_choice = True
         self.selected_wifi_ssid = ""
         self.wifi_connect_thread = None
+
+        # Kept safely as None per initialization specs
         self.wifi_startup_thread = None
 
         self.worker = None
@@ -1896,25 +1574,20 @@ class LoqinTrayApp:
         self.status_action.setIcon(create_status_icon("yellow"))
         self.tray.setToolTip("Loqin - Connecting to Wi-Fi")
 
-        self.force_logout()
-        # Give Windows a moment to initialize its WLAN service, then try the
-        # last successfully connected Wi-Fi before showing the picker.
+        self.force_logout_and_relogin()
+        
+        # --- FIX: We now solely rely on auto_connect_last_wifi and delete the conflicting check_and_auto_connect timer ---
         QTimer.singleShot(1200, self.auto_connect_last_wifi)
         
-        # Bandwidth & Speed Meter update timer (1 second interval)
         self.speed_timer = QTimer()
         self.speed_timer.timeout.connect(self.update_bandwidth_meters)
         self.speed_timer.start(1000)
 
         self.has_checked_for_updates = False
 
-        # Call during app initialization or initial startup timer
-        QTimer.singleShot(1000, self.check_and_auto_connect)
-
     def build_menu(self):
         self.menu = QMenu()
 
-        # Connection Status action with colored dot icon
         self.status_action = QAction("Status: Initializing...", self.menu)
         self.status_action.setIcon(create_status_icon("yellow"))
         self.status_action.setEnabled(True)
@@ -1922,12 +1595,10 @@ class LoqinTrayApp:
 
         self.menu.addSeparator()
 
-        # Static Upload / Download Speed Meter action
         self.speed_action = QAction("Speed: ↓ 0 KB/s  ↑ 0 KB/s", self.menu)
         self.speed_action.setEnabled(False)
         self.menu.addAction(self.speed_action)
 
-        # Toggleable Speed Graph action
         self.graph_action = QAction("Show Speed Graph", self.menu)
         self.graph_action.triggered.connect(self.toggle_speed_graph)
         self.menu.addAction(self.graph_action)
@@ -1935,7 +1606,7 @@ class LoqinTrayApp:
         self.menu.addSeparator()
 
         connect_action = QAction("Connect Now", self.menu)
-        connect_action.triggered.connect(self.trigger_manual_check)
+        connect_action.triggered.connect(self.connect_now)
         self.menu.addAction(connect_action)
 
         wifi_action = QAction("Choose Wi-Fi", self.menu)
@@ -1948,15 +1619,14 @@ class LoqinTrayApp:
 
         self.perf_action = QAction("Performance Mode", self.menu)
         self.perf_action.setCheckable(True)
-        self.perf_action.setChecked(False) # Set default state
+        self.perf_action.setChecked(False)
         self.perf_action.triggered.connect(self.trigger_performance_mode)
         self.menu.addAction(self.perf_action)   
 
         self.menu.addSeparator()
 
-
         self.account_action = QAction("View Account Details", self.menu)
-        self.account_action.setEnabled(False) # Disabled until we get the URL
+        self.account_action.setEnabled(False) 
         self.account_action.triggered.connect(self.show_account_details)
         self.menu.addAction(self.account_action)
 
@@ -2001,16 +1671,12 @@ class LoqinTrayApp:
         self.tray.setToolTip("Loqin PC")
 
     def on_tray_icon_activated(self, reason):
-        """Handles clicks on the system tray icon."""
-        # QSystemTrayIcon.Trigger represents a standard left-click
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
-            # Display the menu at the current mouse position
             menu = self.tray.contextMenu()
             if menu is not None:
                 menu.exec(QCursor.pos())
 
     def toggle_service_pause(self):
-        # Ensure the worker actually exists before trying to pause it
         if hasattr(self, 'worker') and self.worker:
             is_now_paused = self.worker.toggle_pause()
             
@@ -2022,13 +1688,11 @@ class LoqinTrayApp:
                 self.tray.setToolTip("Loqin - Active")
 
     def close_app(self):
-        # Wrap logout in a try-except with a timeout so it doesn't hang the app closing
         try:
             requests.get('http://phc.prontonetworks.com/cgi-bin/authlogout/', timeout=2)
         except Exception:
             pass
             
-        # Nicely shut down threads before quitting 
         if hasattr(self, 'worker') and self.worker and self.worker.isRunning():
             self.worker.is_running = False
             self.worker.quit()
@@ -2056,61 +1720,60 @@ class LoqinTrayApp:
             self.last_net_io = current_net_io
             self.last_time = current_time
 
-            # Format text cleanly (KB/s or MB/s)
             dl_str = f"{dl_speed / 1024:.1f} KB/s" if dl_speed < 1048576 else f"{dl_speed / 1048576:.1f} MB/s"
             ul_str = f"{ul_speed / 1024:.1f} KB/s" if ul_speed < 1048576 else f"{ul_speed / 1048576:.1f} MB/s"
             
-            # Update static speed meter in tray menu
             self.speed_action.setText(f"Speed: ↓ {dl_str}  ↑ {ul_str}")
 
-            # Feed graph window if open
             if self.graph_dialog and self.graph_dialog.isVisible():
                 self.graph_dialog.update_data(dl_speed, ul_speed)
 
     def toggle_speed_graph(self):
         if not self.graph_dialog:
             self.graph_dialog = SpeedGraphDialog()
-            # Reset menu action text whenever the dialog is closed manually
             self.graph_dialog.finished.connect(lambda: self.graph_action.setText("Show Speed Graph"))
         
         if self.graph_dialog.isVisible():
-            # If open but buried behind other windows, bring it to the front
             if not self.graph_dialog.isActiveWindow():
                 self.graph_dialog.showNormal()
                 self.graph_dialog.raise_()
                 self.graph_dialog.activateWindow()
                 self.graph_action.setText("Hide Speed Graph")
             else:
-                # If already in focus, hide it
                 self.graph_dialog.hide()
                 self.graph_action.setText("Show Speed Graph")
         else:
-            # If closed or hidden, open and focus it
             self.graph_dialog.showNormal()
             self.graph_dialog.raise_()
             self.graph_dialog.activateWindow()
             self.graph_action.setText("Hide Speed Graph")
 
     def open_settings(self):
-        # Check if the settings dialog already exists and is open
         if hasattr(self, 'settings_dialog') and self.settings_dialog is not None:
             if self.settings_dialog.isVisible():
-                self.settings_dialog.showNormal()     # Restores if minimized
-                self.settings_dialog.raise_()         # Brings to the front of the screen
-                self.settings_dialog.activateWindow() # Gives it keyboard focus
+                self.settings_dialog.showNormal()     
+                self.settings_dialog.raise_()         
+                self.settings_dialog.activateWindow() 
                 return
 
-        # If not open, create and execute it
         self.settings_dialog = SettingsDialog()
         if self.settings_dialog.exec():
             self.config = ConfigManager.load_config()
             self.start_monitoring_timer()
             
-        # Clean up the reference after the window is closed
         self.settings_dialog = None
 
+    def connect_now(self):
+        current_ssid = (get_current_wifi_ssid() or "").strip()
+        last_ssid = (self.config.get("last_wifi_ssid") or "").strip()
+
+        if last_ssid and current_ssid.lower() != last_ssid.lower():
+            self.auto_connect_last_wifi()
+            return # If you see this, I ask you. why
+
+        self.trigger_manual_check()
+
     def trigger_manual_check(self):
-        # Prevent overwriting an actively running thread
         if hasattr(self, 'worker') and self.worker and self.worker.isRunning():
             return
 
@@ -2120,7 +1783,6 @@ class LoqinTrayApp:
             self.tray.setToolTip("Loqin - Waiting for Wi-Fi selection")
             return
             
-        # --- NEW: Detect New Wi-Fi (BSSID Change) ---
         current_bssid = None
         try:
             output = subprocess.check_output(
@@ -2130,7 +1792,7 @@ class LoqinTrayApp:
             
             for line in output.split('\n'):
                 if "BSSID" in line and "BSSID" == line.split(":")[0].strip():
-                    parts = line.split(":")
+                    parts = line.split(":") # string splitting is a cannon event
                     if len(parts) >= 4:
                         current_bssid = ":".join(parts[1:]).strip().lower().replace("-", ":")
                         break
@@ -2140,20 +1802,18 @@ class LoqinTrayApp:
         if not hasattr(self, 'last_bssid'):
             self.last_bssid = current_bssid
 
-        # If a new Wi-Fi connection is detected and Performance Mode is ON
         if current_bssid and current_bssid != self.last_bssid:
             self.last_bssid = current_bssid
             if self.perf_action.isChecked():
-                # Avoid infinite optimization loops if the thread itself changed the BSSID
                 if getattr(self, 'just_optimized', False):
                     self.just_optimized = False
                 else:
-                    self.trigger_performance_mode(checked=True)
-                    return  # Skip standard worker; Performance Mode handles it
+                    # --- Wait 5 seconds before launching Performance scan so we don't sever the fresh connection ---
+                    QTimer.singleShot(5000, lambda: self.trigger_performance_mode(checked=True))
+                    return 
         
         self.last_bssid = current_bssid
-        self.just_optimized = False # Ensure the flag resets
-        # --------------------------------------------
+        self.just_optimized = False 
             
         self.config = ConfigManager.load_config()
         self.worker = NetworkWorker(self.config)
@@ -2171,11 +1831,9 @@ class LoqinTrayApp:
                 self.pause_action.setText("Resume Loqin")
                 self.tray.setToolTip("Loqin - Paused (Missing Credentials)")
 
-            # Open settings dialog automatically on main thread
             QTimer.singleShot(100, self.open_settings)
             return
 
-        # --- Trigger Update Check on Successful Connection ---
         if color_type == "green":
             current_ssid = get_current_wifi_ssid()
             if current_ssid:
@@ -2185,11 +1843,8 @@ class LoqinTrayApp:
             if "successfully" in message:
                 self.tray.showMessage("Loqin", message, self.icon, 3000)
             
-            # Check for updates only once per app session to avoid API rate limits
             if not getattr(self, 'has_checked_for_updates', False):
                 self.has_checked_for_updates = True
-                # FIX: Wait 3.5 seconds before checking updates to let the 
-                # captive portal firewall fully open up HTTPS traffic.
                 QTimer.singleShot(3500, lambda: self.check_for_updates(True))
 
         elif color_type == "error":
@@ -2204,10 +1859,9 @@ class LoqinTrayApp:
             self.pause_action.setText("Resume Loqin")
             self.tray.setToolTip("Loqin - Paused (Optimizing Network)")
             
-        # Icon swap
         if checked:
             self.tray.setIcon(self.perf_icon)
-            self.icon = self.perf_icon  # Updates self.icon so pop-up notifications use it too
+            self.icon = self.perf_icon  
         else:
             self.tray.setIcon(self.default_icon)
             self.icon = self.default_icon
@@ -2222,7 +1876,6 @@ class LoqinTrayApp:
         self.tray.showMessage("Performance Mode", message, self.icon, 4000)
         
         if message != "Optimizing Network...":
-            # --- NEW: Set flag so we don't infinitely loop BSSID changes ---
             self.just_optimized = True
             
             if hasattr(self, 'worker') and self.worker:
@@ -2257,35 +1910,25 @@ class LoqinTrayApp:
             
             rows_data = []
             
-            # 1. Scrape all standard session rows (#DDDDDD and #F3F3F3 backgrounds)
             session_rows = soup.find_all('tr', attrs={'bgcolor': ['#DDDDDD', '#F3F3F3']})
             for tr in session_rows:
                 cols = [td.text.strip() for td in tr.find_all('td')]
                 if len(cols) == 7:
                     rows_data.append(cols)
             
-            # 2. Scrape Grand Total summary row
             grand_total_data = []
             grand_total_label = soup.find(string=lambda text: text and "Grand Total" in text)
             if grand_total_label:
                 tr = grand_total_label.find_parent('tr')
-                # Extract Usage Time, Upload, Download, Total Data
                 cols = [td.text.strip() for td in tr.find_all('td')]
-                grand_total_data = cols[1:] # Skip label cell
+                grand_total_data = cols[1:] 
                 
-            # 3. Feed the full table data to the Qt Dialog
             self.account_dialog.populate_table(rows_data, grand_total_data)
             
         except Exception as e:
             print(f"Failed to scrape account history table: {e}")
 
-
     def check_for_updates(self, silent=False):
-        """
-        Checks for updates on GitHub.
-        :param silent: If True, suppresses the 'Up to Date' dialog when no new updates are found.
-        """
-        # Prevent multiple update threads from running simultaneously
         if hasattr(self, 'update_checker') and self.update_checker and self.update_checker.isRunning():
             return
             
@@ -2296,7 +1939,6 @@ class LoqinTrayApp:
         self.update_checker = UpdateChecker()
         self.update_checker.update_found.connect(self.prompt_update)
         
-        # Only show the "Up to Date" popup if triggered manually (not on startup)
         if not silent:
             self.update_checker.no_update_found.connect(self.prompt_no_update) 
             self.update_checker.finished.connect(lambda: self.update_action.setText("Check for Updates"))
@@ -2305,7 +1947,6 @@ class LoqinTrayApp:
         self.update_checker.start()
 
     def prompt_no_update(self):
-        """Displays a GUI dialog when the app is already on the latest version."""
         QMessageBox.information(
             None,
             "Up to Date",
@@ -2319,7 +1960,6 @@ class LoqinTrayApp:
         dialog = ReleaseNotesDialog(version, notes)
         dialog.setWindowIcon(self.icon)
 
-        # Exec returns QDialog.DialogCode.Accepted if they click "Install Now"
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.start_download(url)
 
@@ -2334,7 +1974,6 @@ class LoqinTrayApp:
         self.downloader.progress.connect(self.progress_dialog.setValue)
         self.downloader.finished.connect(self.install_update)
         
-        # Cancel button logic
         self.progress_dialog.canceled.connect(self.downloader.terminate)
         
         self.downloader.start()
@@ -2342,7 +1981,6 @@ class LoqinTrayApp:
     def install_update(self, exe_path):
         self.progress_dialog.close()
         
-        # We ensure the downloaded web installer is somewhat valid (> 1MB check removed since web installers are tiny)
         if not exe_path or not os.path.exists(exe_path):
             QMessageBox.warning(
                 None, 
@@ -2352,13 +1990,11 @@ class LoqinTrayApp:
             return
             
         try:
-            # os.startfile natively triggers the UAC Admin prompt required by Inno Setup
             if sys.platform == "win32":
                 os.startfile(exe_path)
             else:
                 subprocess.Popen([exe_path])
                 
-            # Exit the current app so the installer can replace it
             self.app.quit()
         except Exception as e:
             QMessageBox.critical(None, "Update Error", f"Failed to launch the installer:\n{str(e)}")
@@ -2375,7 +2011,6 @@ class LoqinTrayApp:
             self.trigger_manual_check()
 
     def save_last_wifi(self, ssid):
-        """Persist the last successfully connected Wi-Fi SSID."""
         ssid = (ssid or "").strip()
         if not ssid:
             return
@@ -2383,7 +2018,7 @@ class LoqinTrayApp:
         ConfigManager.save_config(self.config)
 
     def auto_connect_last_wifi(self):
-        """Scan for the last Wi-Fi. Use it automatically when it is in range."""
+        """Use the last successfully connected Wi-Fi automatically."""
         last_ssid = (self.config.get("last_wifi_ssid") or "").strip()
 
         if not last_ssid:
@@ -2394,41 +2029,12 @@ class LoqinTrayApp:
             self.on_wifi_connection_success(last_ssid, automatic=True)
             return
 
-        self.status_action.setText(f"Status: Searching for {last_ssid}...")
+        self.status_action.setText(f"Status: Connecting to {last_ssid}...")
         self.status_action.setIcon(create_status_icon("yellow"))
-        self.tray.setToolTip(f"Loqin - Looking for {last_ssid}")
+        self.tray.setToolTip(f"Loqin - Connecting to {last_ssid}")
 
-        if self.wifi_startup_thread and self.wifi_startup_thread.isRunning():
-            return
-
-        self.wifi_startup_thread = WiFiScanThread()
-        self.wifi_startup_thread.networks_found.connect(
-            lambda networks: self.on_startup_scan_finished(networks, last_ssid)
-        )
-        self.wifi_startup_thread.scan_failed.connect(self.on_startup_scan_failed)
-        self.wifi_startup_thread.finished.connect(self._cleanup_startup_wifi_thread)
-        self.wifi_startup_thread.start()
-
-    def _cleanup_startup_wifi_thread(self):
-        self.wifi_startup_thread = None
-
-    def on_startup_scan_finished(self, networks, last_ssid):
-        available = any(
-            isinstance(network, dict) and
-            network.get("ssid", "").strip().lower() == last_ssid.lower()
-            for network in networks
-        )
-
-        if available:
-            self.connect_to_wifi(last_ssid, automatic=True)
-        else:
-            self.status_action.setText("Status: Last Wi-Fi not in range")
-            self.status_action.setIcon(create_status_icon("yellow"))
-            self.open_wifi_picker()
-
-    def on_startup_scan_failed(self, error):
-        print(f"Startup Wi-Fi scan failed: {error}")
-        self.open_wifi_picker()
+        # --- FIX: Try connecting immediately instead of starting a disrupting hardware scan ---
+        self.connect_to_wifi(last_ssid, automatic=True)
 
     def connect_to_wifi(self, ssid, automatic=False):
         """Connect to a Windows-saved Wi-Fi profile without blocking the UI."""
@@ -2478,9 +2084,7 @@ class LoqinTrayApp:
         self.open_wifi_picker()
 
     def force_logout(self):
-        """Silently drops the Pronto Networks Wi-Fi session."""
         try:
-            # Standard Pronto Network global logout URL
             requests.get("http://phc.prontonetworks.com/cgi-bin/authlogout", timeout=3)
             print("Successfully dropped existing Wi-Fi session.")
         except Exception as e:
@@ -2492,76 +2096,32 @@ class LoqinTrayApp:
             self.wifi_picker.wifi_chosen.connect(self.on_wifi_chosen)
             self.wifi_picker.finished.connect(self.wifi_picker.scan_thread.exit)
         else:
-            # The previous picker closes after emitting a selection; make it reusable
-            # when the user opens "Choose Wi-Fi" again from the tray.
             self.wifi_picker.is_connecting = False
             self.wifi_picker.scan_networks()
         self.wifi_picker.show()
         self.wifi_picker.raise_()
         self.wifi_picker.activateWindow()
 
-    def check_and_auto_connect(self):
-        """
-        Scans for available Wi-Fi networks and checks if the last connected Wi-Fi is in range.
-        """
-        last_ssid = (self.config.get("last_wifi_ssid") or "").strip()
-        current_ssid = get_current_wifi_ssid()
-
-        # if already connected to the target last wifi, just force re-login
-        if current_ssid and last_ssid and current_ssid.lower() == last_ssid.lower():
-            print(f"Already connected to '{current_ssid}'. Performing login...")
-            self.trigger_manual_check()
-            return
-
-        print("Scanning nearby Wi-Fi networks to locate last connected network...")
-        self.tray.setToolTip("Loqin - Scanning for Wi-Fi...")
-        
-        # Run background scan thread
-        self.startup_scan_thread = WiFiScanThread()
-        self.startup_scan_thread.networks_found.connect(self._on_auto_connect_scan_finished)
-        self.startup_scan_thread.scan_failed.connect(lambda err: self.open_wifi_picker())
-        self.startup_scan_thread.start()
-
-    def _on_auto_connect_scan_finished(self, networks):
-        """Callback handling the results of the initial Wi-Fi range check."""
-        last_ssid = (self.config.get("last_wifi_ssid") or "").strip()
-        available_ssids = [net.get("ssid") for net in networks if net.get("ssid")]
-
-        # Check if last_ssid exists and is currently in range
-        if last_ssid and last_ssid in available_ssids:
-            print(f"Last connected Wi-Fi '{last_ssid}' is in range. Auto-connecting...")
-            self.connect_to_wifi(last_ssid, automatic=True)
-        else:
-            print(f"Last connected Wi-Fi '{last_ssid}' is NOT in range. Opening Wi-Fi Picker...")
-            self.open_wifi_picker()
-
     def on_wifi_chosen(self, ssid):
-        """Triggered when a Wi-Fi network is selected from the WiFiPickerDialog."""
         print(f"Wi-Fi selection changed via picker to: {ssid}")
         self.save_last_wifi(ssid)
         self.connect_to_wifi(ssid, automatic=False)
 
     def connect_and_relogin(self, ssid):
-        """Connects to target SSID, waits for interface handshake, drops session, and logs in."""
         self.tray.setToolTip(f"Loqin - Connecting to {ssid}...")
         self.status_action.setText(f"Connecting to {ssid}...")
         
-        # Connect to Wi-Fi network
         self.connect_to_wifi(ssid, automatic=False)
 
-        # Schedule re-login after giving Windows 4 seconds to assign IP & route traffic
         QTimer.singleShot(4000, self.force_logout_and_relogin)
 
     def force_logout_and_relogin(self):
-        """Clears existing portal session and initiates fresh captive portal authentication."""
         print("Resetting portal session and logging in...")
         self.tray.setToolTip("Loqin - Re-logging in...")
         self.status_action.setText("Logging in...")
         
-        # Drop previous network session (Pronto Networks logout)
         self.force_logout()
 
-        # Trigger captive portal login sequence through the existing worker flow.
         QTimer.singleShot(1000, self.trigger_manual_check)
 
     def run(self):
@@ -2577,6 +2137,5 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"Failed to set AppUserModelID: {e}")
 
-    # Initialize your app as normal
     app = LoqinTrayApp()
     app.run()

@@ -10,6 +10,10 @@ Loqin PC - Automated VIT Hostel Wi-Fi Client
    :target: https://github.com/notaayushsrivastava/Loqin/releases/latest/download/Install_loqin.exe
    :alt: Download Loqin PC Installer
 
+.. |mac| image:: https://img.shields.io/badge/Download-Loqin_Installer_MacOS-0078D8?style=for-the-badge&logo=mac&logoColor=black
+   :target: https://github.com/notaayushsrivastava/Loqin/releases/latest/download/Install_Loqin_macOS.dmg
+   :alt: Download Loqin MacOS Installer
+
 .. |vercel| image:: https://img.shields.io/badge/Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white
    :target: https://loqin-vit.vercel.app/
    :alt: Deployed on Vercel
@@ -18,16 +22,17 @@ Loqin PC - Automated VIT Hostel Wi-Fi Client
    :target: https://winget.run/pkg/notaayushsrivastava.Loqin
    :alt: WinGet Version
 
-|installer| |vercel| |winget|
+|installer| |mac| |vercel| |winget|
 
 .. image:: https://img.shields.io/badge/Python-3.8%2B-blue.svg
    :target: https://www.python.org/
 .. image:: https://img.shields.io/badge/GUI-PyQt6-green.svg
    :target: https://pypi.org/project/PyQt6/
 .. image:: https://img.shields.io/badge/Platform-Windows-lightgrey.svg
+.. image:: https://img.shields.io/badge/Platform-macOS-lightgrey.svg
 .. image:: https://img.shields.io/badge/Maintained%20by-Aayush%20Srivastava-orange.svg
    :target: https://aayushsrivastava.pythonanywhere.com/
-.. image:: https://img.shields.io/badge/version-1.6.4-blue.svg
+.. image:: https://img.shields.io/badge/version-1.7.0-blue.svg
    :target: https://github.com/notaayushsrivastava/Loqin/releases
 .. image:: https://img.shields.io/badge/License-GPLv3-blue.svg
    :target: LICENSE

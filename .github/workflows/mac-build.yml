@@ -1,0 +1,67 @@
+name: Build macOS Release (.dmg)
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  build-mac:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller pyobjc-framework-CoreWLAN PyQt5 pillow
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Install Packaging Tools
+        run: brew install create-dmg
+
+      - name: Build App with PyInstaller
+        run: |
+          pyinstaller --noconsole --onefile --add-data "assets:assets" --icon="assets/loqin_logo_small.icns" --name="Loqin" --clean --noconfirm Loqin_mac.spec
+
+      - name: Ad-Hoc Sign .app Bundle
+        run: |
+          codesign --force --deep -s - dist/Loqin.app
+
+      - name: Generate DMG Installer
+        run: |
+          mkdir -p Output
+          create-dmg \
+            --volname "Loqin Installer" \
+            --eula "eula.txt" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --icon "Loqin.app" 150 190 \
+            --hide-extension "Loqin.app" \
+            --app-drop-link 450 190 \
+            "Output/Install_Loqin_macOS.dmg" \
+            "dist/Loqin.app"
+      
+      - name: Ad-Hoc Sign DMG
+        run: |
+          codesign --force -s - "Output/Install_Loqin_macOS.dmg"
+
+      - name: Upload DMG as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Loqin-macOS-Installer
+          path: Output/Install_Loqin_macOS.dmg
+
+      - name: Upload DMG to Release Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Output/Install_Loqin_macOS.dmg
