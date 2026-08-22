@@ -16,7 +16,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.13'
           cache: 'pip'
 
       - name: Install Python Dependencies
@@ -30,7 +30,7 @@ jobs:
 
       - name: Build App with PyInstaller
         run: |
-          pyinstaller --noconsole --onefile --add-data "assets:assets" --icon="assets/loqin_logo_small.icns" --name="Loqin" --clean --noconfirm Loqin_mac.spec
+          pyinstaller --clean --noconfirm Loqin_mac.spec
 
       - name: Ad-Hoc Sign .app Bundle
         run: |
