@@ -6,7 +6,7 @@ a = Analysis(
     ['mac.py'],
     pathex=[],
     binaries=[],
-    datas=[('assets', 'assets')],
+    datas=[('assets', 'assets', ('app.py', '.'))],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
