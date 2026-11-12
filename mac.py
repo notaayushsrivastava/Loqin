@@ -38,17 +38,10 @@ LOCK_PATH = Path(tempfile.gettempdir()) / "com.loqin.app.lock"
 
 def _install_import_shims() -> None:
     """
-    cheating by loading app then switching 
+    Optional compatibility hook retained for backward compatibility.
+    The shared app is natively importable on macOS without shims.
     """
-    if "winreg" not in sys.modules:
-        sys.modules["winreg"] = types.ModuleType("winreg")
-    if "pywifi" not in sys.modules:
-        pywifi = types.ModuleType("pywifi")
-        pywifi.const = types.ModuleType("pywifi.const")
-        pywifi.PyWiFi = object
-        pywifi.Profile = object
-        sys.modules["pywifi"] = pywifi
-        sys.modules["pywifi.const"] = pywifi.const
+    pass
 
 
 def _load_shared_app():

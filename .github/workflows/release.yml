@@ -56,19 +56,25 @@ jobs:
     outputs:
       tag: ${{ steps.compute_tag.outputs.tag }}
       version: ${{ steps.compute_tag.outputs.version }}
-      commit_body: ${{ steps.commit_msg.outputs.body }}
+      release_body: ${{ steps.release_notes.outputs.body }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Get Recent Commit Message
-        id: commit_msg
+      - name: Read Release Notes
+        id: release_notes
         run: |
-          MSG=$(git log -1 --pretty=format:"%B")
+          if [ -f "RELEASE" ]; then
+            echo "Using RELEASE file contents for release notes."
+            BODY=$(cat RELEASE)
+          else
+            echo "RELEASE file not found; falling back to commit message."
+            BODY=$(git log -1 --pretty=format:"%B")
+          fi
           echo "body<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$MSG" >> "$GITHUB_OUTPUT"
+          echo "$BODY" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
 
       - name: Compute Next Semantic Tag
@@ -267,13 +273,28 @@ jobs:
         run: ls -la release_assets/
 
       - name: Publish GitHub Release
+        id: create_release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.autotag.outputs.tag }}
           name: Loqin ${{ needs.autotag.outputs.tag }}
-          body: ${{ needs.autotag.outputs.commit_body }}
+          body: ${{ needs.autotag.outputs.release_body }}
           files: |
             release_assets/Install_Loqin.exe
             release_assets/Install_Loqin_WinGet.exe
             release_assets/Install_Loqin_Update.exe
             release_assets/Install_Loqin_macOS.dmg
+
+  winget-submission:
+    name: Submit to Windows Package Manager (WinGet)
+    needs: [autotag, publish-release]
+    runs-on: windows-latest
+    steps:
+      - name: Submit package to Windows Package Manager Community Repository
+        uses: vedantmgoyal2009/winget-releaser@v2
+        with:
+          identifier: notaayushsrivastava.Loqin
+          version: ${{ needs.autotag.outputs.version }}
+          installer-type: inno
+          installer-url: https://github.com/notaayushsrivastava/Loqin/releases/download/${{ needs.autotag.outputs.tag }}/Install_Loqin_WinGet.exe
+          token: ${{ secrets.WINGET_TOKEN || secrets.GITHUB_TOKEN }}

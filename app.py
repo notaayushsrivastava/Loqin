@@ -11,11 +11,22 @@ import psutil
 import subprocess
 import re
 import ctypes
-import ctypes.wintypes
-import pywifi
-import winreg
-from pywifi import const
 from datetime import datetime
+
+# --- PLATFORM-CONDITIONAL IMPORTS ---
+if sys.platform == "win32":
+    import ctypes.wintypes
+    import winreg
+    try:
+        import pywifi
+        from pywifi import const
+    except Exception:
+        pywifi = None
+        const = None
+else:
+    winreg = None
+    pywifi = None
+    const = None
 from urllib.parse import urlparse
 from PyQt6.QtWidgets import (
     QApplication, QSystemTrayIcon, QMenu, QDialog, QVBoxLayout, 
@@ -47,7 +58,10 @@ PBT_APMSUSPEND = 0x0004            # System is sleeping
 PBT_APMRESUMEAUTOMATIC = 0x0012    # System resumed automatically
 
 def ensure_single_instance():
-    # Create or open named mutex
+    if sys.platform != "win32":
+        return None
+
+    # Create or open named mutex on Windows
     kernel32 = ctypes.windll.kernel32
     mutex = kernel32.CreateMutexW(None, False, MUTEX_NAME)
     
@@ -158,6 +172,9 @@ class PowerEventFilter(QAbstractNativeEventFilter):
 
     def nativeEventFilter(self, eventType, message):
         """Intercept native Windows messages to detect sleep/wake"""
+        if sys.platform != "win32":
+            return False, 0
+
         msg = ctypes.wintypes.MSG.from_address(int(message))
         
         if msg.message == WM_POWERBROADCAST:
@@ -203,6 +220,10 @@ class PerformanceModeThread(QThread):
     def run(self):
         status_msg = "Optimizing Network..." if self.use_best else "Reverting Network..."
         self.status_signal.emit(status_msg, "yellow")
+
+        if not pywifi or sys.platform != "win32":
+            self.status_signal.emit("Performance Mode requires Windows Wi-Fi backend.", "error")
+            return
         
         try:
             wifi = pywifi.PyWiFi()
@@ -342,6 +363,10 @@ class WiFiScanThread(QThread):
     scan_failed = pyqtSignal(str)
 
     def run(self):
+        if not pywifi or sys.platform != "win32":
+            self.scan_failed.emit("Wi-Fi scanning via pywifi is only supported on Windows.")
+            return
+
         try:
             wifi = pywifi.PyWiFi()
             interfaces = wifi.interfaces()

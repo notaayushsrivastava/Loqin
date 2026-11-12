@@ -5,7 +5,7 @@ bs4==0.0.2
 certifi==2026.7.22
 charset-normalizer==3.4.9
 colorama==0.4.6
-comtypes==1.4.16
+comtypes==1.4.16; sys_platform == 'win32'
 idna==3.18
 jaraco.classes==3.4.0
 jaraco.context==6.1.2
@@ -23,8 +23,8 @@ PyQt6==6.11.0
 PyQt6-Qt6==6.11.1
 PyQt6_sip==13.11.1
 pyqtgraph==0.14.0
-pywifi==1.1.12
-pywin32-ctypes==0.2.3
+pywifi==1.1.12; sys_platform == 'win32'
+pywin32-ctypes==0.2.3; sys_platform == 'win32'
 pytest>=8.0.0
 qrcode==8.2
 requests==2.34.2

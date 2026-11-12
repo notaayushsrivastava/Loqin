@@ -1,0 +1,36 @@
+# Release Notes - Loqin v1.8.0
+
+Loqin is getting leaner. This release cuts unnecessary background work, brings optional features in only when you need them, and keeps the fast, reliable Wi-Fi experience you count on.
+
+* * *
+
+### Faster, Lighter Startup
+
+  * **On-Demand Speed Graph:** The graph engine now loads only when you open the Speed Graph. If you just want Loqin quietly handling Wi-Fi, the graph’s extra memory stays out of the way.
+  * **Smarter Dialog Cleanup:** Closing the graph releases its window and chart data. Reopen it whenever you want a fresh view.
+  * **Lean Account Tools:** Account history support loads when you open that feature, keeping everyday startup focused on what you use.
+
+* * *
+
+### Less Work While Loqin Waits
+
+  * **Quiet Wi-Fi Picker:** Nearby network scans pause while the picker is closed and resume when you open it.
+  * **Smarter Speed Updates:** Loqin samples traffic when the tray menu or live graph needs an update, reducing needless background activity.
+  * **Responsive Network Monitoring:** Native network events keep connection changes quick to detect, with a fallback check for portal sessions and silent connectivity loss.
+
+* * *
+
+### Compatibility & Reliability
+
+  * **Existing Python Support Preserved:** Resource improvements use standard deferred imports, avoiding a required move to Python 3.15-only syntax.
+  * **Windows and macOS Builds:** Both desktop builds retain their existing features, including the Speed Graph and account tools.
+  * **Clean Reopen and Shutdown:** Optional windows, timers, and monitors are handled cleanly as you close features or exit Loqin.
+
+* * *
+
+### Download & Installation
+
+  * **Windows:** Download and run `Install_Loqin.exe`.
+  * **macOS:** Download `Install_Loqin_macOS.dmg`, accept the license, and drag Loqin.app to your Applications folder.
+
+Full Changelog: `v1.7.0...v1.8.0`
