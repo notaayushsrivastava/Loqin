@@ -9,14 +9,12 @@ import requests
 import keyring
 import psutil
 import subprocess
-import pyqtgraph as pg
 import re
 import ctypes
 import ctypes.wintypes
 import pywifi
 import winreg
 from pywifi import const
-from bs4 import BeautifulSoup
 from datetime import datetime
 from urllib.parse import urlparse
 from PyQt6.QtWidgets import (
@@ -29,11 +27,12 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QIcon, QAction, QPixmap, QColor, QPainter, QDesktopServices, QCursor
 from PyQt6.QtCore import QThread, pyqtSignal, Qt, QTimer, QUrl, QAbstractNativeEventFilter, QPropertyAnimation, QEasingCurve, QSize
+from network_monitor import get_network_event_monitor
 
 APP_NAME = "Loqin"
 APPDATA_DIR = os.path.join(os.getenv("APPDATA", os.path.expanduser("~")), "Loqin")
 CONFIG_FILE = os.path.join(APPDATA_DIR, "Loqin_config.json")
-APP_VERSION = "1.7.0"
+APP_VERSION = "1.8.0"
 GITHUB_API_URL = "https://api.github.com/repos/notaayushsrivastava/loqin/releases/latest"
 
 # --- WINDOWS STARTUP REGISTRY HELPER ---
@@ -492,12 +491,26 @@ class WiFiPickerDialog(QDialog):
         self.scroll.setWidget(self.cards)
         root.addWidget(self.scroll, 1)
 
+        self.displayed_cards = {}  # (ssid, is_portal) -> QPushButton
+
         self.show_skeleton_loading()
         self.auto_refresh_timer = QTimer(self)
         self.auto_refresh_timer.setInterval(5000)
         self.auto_refresh_timer.timeout.connect(self.scan_networks)
-        self.auto_refresh_timer.start()
-        self.scan_networks()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self.is_connecting:
+            self.scan_networks()
+            self.auto_refresh_timer.start(5000)
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        self.auto_refresh_timer.stop()
+
+    def closeEvent(self, event):
+        super().closeEvent(event)
+        self.auto_refresh_timer.stop()
 
     def show_skeleton_loading(self, count=6, columns=2):
         self.clear_cards_layout()
@@ -523,6 +536,7 @@ class WiFiPickerDialog(QDialog):
             item = self.cards_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+        self.displayed_cards = {}
 
     def scan_networks(self):
         if self.is_connecting or self.scan_thread.isRunning():
@@ -544,6 +558,24 @@ class WiFiPickerDialog(QDialog):
         self.status.setStyleSheet("color: #a7b0d6; font-size: 14px;")
 
     def update_networks_ui(self, portal_networks, normal_networks, columns=2):
+        # Optimization: if the set and order of networks match already rendered cards, update signals in-place
+        current_keys = []
+        if portal_networks:
+            current_keys.extend([(net.get("ssid", "Unknown"), True) for net in portal_networks])
+        if normal_networks:
+            current_keys.extend([(net.get("ssid", "Unknown"), False) for net in normal_networks])
+
+        if self.initial_scan_done and list(self.displayed_cards.keys()) == current_keys:
+            all_nets = [(net, True) for net in portal_networks] + [(net, False) for net in normal_networks]
+            for net, is_portal in all_nets:
+                ssid = net.get("ssid", "Unknown")
+                signal = int(net.get("signal", -100))
+                security = "Open network" if not net.get("secured", True) else "Secured network"
+                btn = self.displayed_cards.get((ssid, is_portal))
+                if btn:
+                    btn.setText(f"{ssid}\n{security}  •  {signal} dBm")
+            return
+
         self.skeleton_anims.clear()
         self.clear_cards_layout()
         self.initial_scan_done = True
@@ -577,6 +609,7 @@ class WiFiPickerDialog(QDialog):
         button.setMinimumHeight(94)
         button.setCursor(Qt.CursorShape.PointingHandCursor)
         button.clicked.connect(lambda checked=False, target=ssid: self.connect_to_network(target))
+        self.displayed_cards[(ssid, is_portal)] = button
         self.cards_layout.addWidget(button, row, column)
 
     def connect_to_network(self, ssid):
@@ -1000,7 +1033,7 @@ class ConfigManager:
     def load_config():
         default_config = {
             "username": "",
-            "interval": 10,
+            "interval": 30,
             "auto_connect": True,
             "last_wifi_ssid": ""
         }
@@ -1175,8 +1208,32 @@ class NetworkWorker(QThread):
             self.status_signal.emit("Portal timeout or error.", "error")
 
 class SpeedGraphDialog(QDialog):
+    @staticmethod
+    def _get_pg():
+        import pyqtgraph as pg
+        try:
+            import numpy as np
+            orig_arange = np.arange
+            def safe_arange(*args, **kwargs):
+                try:
+                    return orig_arange(*args, **kwargs)
+                except ValueError:
+                    if len(args) == 1:
+                        return np.array(list(range(int(args[0]))), dtype=kwargs.get('dtype', int))
+                    elif len(args) == 2:
+                        return np.array(list(range(int(args[0]), int(args[1]))), dtype=kwargs.get('dtype', int))
+                    elif len(args) == 3:
+                        return np.array(list(range(int(args[0]), int(args[1]), int(args[2]))), dtype=kwargs.get('dtype', int))
+                    raise
+            np.arange = safe_arange
+        except Exception:
+            pass
+        return pg
+
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self.pg = self._get_pg()
 
         self.setWindowTitle("Loqin • Live Network Monitor")
         self.setWindowIcon(QIcon(resource_path("loqin_logo_small.png")))
@@ -1229,7 +1286,7 @@ class SpeedGraphDialog(QDialog):
 
         layout.addLayout(header_layout)
 
-        self.graph = pg.PlotWidget()
+        self.graph = self.pg.PlotWidget()
 
         layout.addWidget(self.graph)
 
@@ -1251,23 +1308,23 @@ class SpeedGraphDialog(QDialog):
         self.graph.setDownsampling(mode="peak")
         self.graph.setLabel("left", "Speed (KB/s)", color="#a7b0d6")
         self.graph.setLabel("bottom", "Time", color="#a7b0d6")
-        self.graph.getAxis("left").setPen(pg.mkPen("#59658a"))
-        self.graph.getAxis("bottom").setPen(pg.mkPen("#59658a"))
+        self.graph.getAxis("left").setPen(self.pg.mkPen("#59658a"))
+        self.graph.getAxis("bottom").setPen(self.pg.mkPen("#59658a"))
         self.graph.getAxis("left").setTextPen("#a7b0d6")
         self.graph.getAxis("bottom").setTextPen("#a7b0d6")
         self.graph.setYRange(0, 100)
 
         self.download_curve = self.graph.plot(
-            pen=pg.mkPen("#66c7ff", width=3),
+            pen=self.pg.mkPen("#66c7ff", width=3),
             name="Download"
         )
         self.upload_curve = self.graph.plot(
-            pen=pg.mkPen("#8ff3c8", width=3),
+            pen=self.pg.mkPen("#8ff3c8", width=3),
             name="Upload"
         )
 
         legend = self.graph.addLegend()
-        legend.setBrush(pg.mkBrush(20, 26, 46, 220))
+        legend.setBrush(self.pg.mkBrush(20, 26, 46, 220))
         legend.setOffset((15, 15))
 
     def keyPressEvent(self, event):
@@ -1315,8 +1372,8 @@ class SpeedGraphDialog(QDialog):
             self.setWindowTitle("Loqin • Nyan Cat Mode!")
             self.setCursor(self.generate_nyan_cursor())
             self.graph.setBackground("#0F051D") 
-            self.download_curve.setPen(pg.mkPen("#FF69B4", width=3)) 
-            self.upload_curve.setPen(pg.mkPen("#00FFFF", width=3))   
+            self.download_curve.setPen(self.pg.mkPen("#FF69B4", width=3)) 
+            self.upload_curve.setPen(self.pg.mkPen("#00FFFF", width=3))   
             self.stats.setStyleSheet("""
                 QLabel{ color:#FFD1DC; font-size:13px; font-weight: bold; }
             """)
@@ -1324,8 +1381,8 @@ class SpeedGraphDialog(QDialog):
             self.setWindowTitle("Loqin • Live Network Monitor")
             self.unsetCursor() 
             self.graph.setBackground("#10162a")
-            self.download_curve.setPen(pg.mkPen("#3da5ff", width=3))
-            self.upload_curve.setPen(pg.mkPen("#2ecc71", width=3))
+            self.download_curve.setPen(self.pg.mkPen("#3da5ff", width=3))
+            self.upload_curve.setPen(self.pg.mkPen("#2ecc71", width=3))
             self.stats.setStyleSheet("""
                 QLabel{ color:#cccccc; font-size:13px; }
             """)
@@ -1490,10 +1547,17 @@ class SettingsDialog(QDialog):
         layout.addWidget(forgot_settings_btn)
 
         interval_layout = QHBoxLayout()
-        interval_layout.addWidget(QLabel("Check Frequency (seconds):"))
+        self.interval_label = QLabel("Fallback Check Interval (seconds):")
+        interval_tooltip = (
+            "Loqin automatically detects Wi-Fi connection and disconnection events in real time.\n"
+            "This periodic fallback interval catches captive portal expiry or silent internet loss."
+        )
+        self.interval_label.setToolTip(interval_tooltip)
+        interval_layout.addWidget(self.interval_label)
         self.interval_input = QSpinBox()
-        self.interval_input.setRange(5, 300)
-        self.interval_input.setValue(self.config.get("interval", 10))
+        self.interval_input.setRange(10, 300)
+        self.interval_input.setValue(self.config.get("interval", 30))
+        self.interval_input.setToolTip(interval_tooltip)
         interval_layout.addWidget(self.interval_input)
         layout.addLayout(interval_layout)
         
@@ -1570,6 +1634,19 @@ class LoqinTrayApp:
         self.wifi_startup_thread = None
 
         self.worker = None
+
+        # --- Setup OS Network Event Monitor & Debounce Timer ---
+        self.network_monitor = get_network_event_monitor(self.app)
+        self.network_monitor.network_changed.connect(self.on_network_changed)
+        self.network_monitor.monitor_error.connect(self.on_monitor_error)
+
+        self.network_debounce_timer = QTimer(self.app)
+        self.network_debounce_timer.setSingleShot(True)
+        self.network_debounce_timer.timeout.connect(self.trigger_manual_check)
+
+        self.network_monitor.start()
+        self.app.aboutToQuit.connect(self.cleanup_monitor)
+
         self.status_action.setText("Status: Looking for your last Wi-Fi...")
         self.status_action.setIcon(create_status_icon("yellow"))
         self.tray.setToolTip("Loqin - Connecting to Wi-Fi")
@@ -1579,14 +1656,20 @@ class LoqinTrayApp:
         # --- FIX: We now solely rely on auto_connect_last_wifi and delete the conflicting check_and_auto_connect timer ---
         QTimer.singleShot(1200, self.auto_connect_last_wifi)
         
-        self.speed_timer = QTimer()
+        # Fallback periodic timer in case of captive portal session expiry or silent link loss
+        self.start_monitoring_timer()
+        
+        # Dynamic speed timer: only active when menu or speed graph is open
+        self.menu_visible = False
+        self.speed_timer = QTimer(self.app)
         self.speed_timer.timeout.connect(self.update_bandwidth_meters)
-        self.speed_timer.start(1000)
 
         self.has_checked_for_updates = False
 
     def build_menu(self):
         self.menu = QMenu()
+        self.menu.aboutToShow.connect(self._on_menu_about_to_show)
+        self.menu.aboutToHide.connect(self._on_menu_about_to_hide)
 
         self.status_action = QAction("Status: Initializing...", self.menu)
         self.status_action.setIcon(create_status_icon("yellow"))
@@ -1687,7 +1770,50 @@ class LoqinTrayApp:
                 self.pause_action.setText("Pause Loqin")
                 self.tray.setToolTip("Loqin - Active")
 
+    def on_network_changed(self, event_type):
+        """
+        React promptly to OS-level network state changes (Native Wi-Fi / NLM / CoreWLAN).
+        """
+        if event_type == "disconnected":
+            # Cancel any pending debounced check
+            if hasattr(self, 'network_debounce_timer') and self.network_debounce_timer.isActive():
+                self.network_debounce_timer.stop()
+
+            # Prevent a running worker from continuing authentication loops while offline
+            if hasattr(self, 'worker') and self.worker and self.worker.isRunning():
+                self.worker.is_running = False
+
+            self.status_action.setText("Status: Waiting for Wi-Fi...")
+            self.status_action.setIcon(create_status_icon("yellow"))
+            self.tray.setToolTip("Loqin - Waiting for Wi-Fi")
+            return
+
+        elif event_type in ("connected", "connectivity_changed"):
+            current_ssid = get_current_wifi_ssid()
+            if current_ssid:
+                self.waiting_for_wifi_choice = False
+                picker = getattr(self, 'wifi_picker', None)
+                if picker and picker.isVisible():
+                    picker.close()
+
+            if getattr(self, 'waiting_for_wifi_choice', False):
+                return
+
+            # Debounce by 750ms to allow IP assignment and interface initialization to stabilize
+            if hasattr(self, 'network_debounce_timer'):
+                self.network_debounce_timer.start(750)
+
+    def on_monitor_error(self, message):
+        print(f"Network event monitor notice: {message}")
+        if not hasattr(self, 'timer') or not self.timer or not self.timer.isActive():
+            self.start_monitoring_timer()
+
+    def cleanup_monitor(self):
+        if hasattr(self, 'network_monitor') and self.network_monitor:
+            self.network_monitor.stop()
+
     def close_app(self):
+        self.cleanup_monitor()
         try:
             requests.get('http://phc.prontonetworks.com/cgi-bin/authlogout/', timeout=2)
         except Exception:
@@ -1708,17 +1834,40 @@ class LoqinTrayApp:
 
         self.app.quit()
 
+    def _on_menu_about_to_show(self):
+        self.menu_visible = True
+        self.update_bandwidth_meters()
+        self._evaluate_speed_timer()
+
+    def _on_menu_about_to_hide(self):
+        self.menu_visible = False
+        self._evaluate_speed_timer()
+
+    def _evaluate_speed_timer(self):
+        should_run = self.menu_visible or (self.graph_dialog is not None and self.graph_dialog.isVisible())
+        if should_run:
+            if not self.speed_timer.isActive():
+                self.speed_timer.start(1000)
+        else:
+            if self.speed_timer.isActive():
+                self.speed_timer.stop()
+
     def update_bandwidth_meters(self):
         current_net_io = psutil.net_io_counters()
         current_time = time.time()
         
+        if self.last_net_io is None or self.last_time == 0:
+            self.last_net_io = current_net_io
+            self.last_time = current_time
+            return
+
         elapsed = current_time - self.last_time
+        self.last_time = current_time
+
         if elapsed > 0:
             dl_speed = (current_net_io.bytes_recv - self.last_net_io.bytes_recv) / elapsed
             ul_speed = (current_net_io.bytes_sent - self.last_net_io.bytes_sent) / elapsed
-            
             self.last_net_io = current_net_io
-            self.last_time = current_time
 
             dl_str = f"{dl_speed / 1024:.1f} KB/s" if dl_speed < 1048576 else f"{dl_speed / 1048576:.1f} MB/s"
             ul_str = f"{ul_speed / 1024:.1f} KB/s" if ul_speed < 1048576 else f"{ul_speed / 1048576:.1f} MB/s"
@@ -1727,26 +1876,31 @@ class LoqinTrayApp:
 
             if self.graph_dialog and self.graph_dialog.isVisible():
                 self.graph_dialog.update_data(dl_speed, ul_speed)
+        else:
+            self.last_net_io = current_net_io
 
     def toggle_speed_graph(self):
-        if not self.graph_dialog:
-            self.graph_dialog = SpeedGraphDialog()
-            self.graph_dialog.finished.connect(lambda: self.graph_action.setText("Show Speed Graph"))
-        
-        if self.graph_dialog.isVisible():
-            if not self.graph_dialog.isActiveWindow():
-                self.graph_dialog.showNormal()
-                self.graph_dialog.raise_()
-                self.graph_dialog.activateWindow()
-                self.graph_action.setText("Hide Speed Graph")
-            else:
-                self.graph_dialog.hide()
-                self.graph_action.setText("Show Speed Graph")
-        else:
-            self.graph_dialog.showNormal()
-            self.graph_dialog.raise_()
-            self.graph_dialog.activateWindow()
-            self.graph_action.setText("Hide Speed Graph")
+        if self.graph_dialog is not None:
+            # If already open/visible, closing it releases all resources
+            self.graph_dialog.close()
+            self.graph_dialog = None
+            self.graph_action.setText("Show Speed Graph")
+            self._evaluate_speed_timer()
+            return
+
+        # Create fresh dialog and fresh 60-second history
+        self.graph_dialog = SpeedGraphDialog()
+        self.graph_dialog.destroyed.connect(self._on_graph_dialog_destroyed)
+        self.graph_dialog.showNormal()
+        self.graph_dialog.raise_()
+        self.graph_dialog.activateWindow()
+        self.graph_action.setText("Hide Speed Graph")
+        self._evaluate_speed_timer()
+
+    def _on_graph_dialog_destroyed(self):
+        self.graph_dialog = None
+        self.graph_action.setText("Show Speed Graph")
+        self._evaluate_speed_timer()
 
     def open_settings(self):
         if hasattr(self, 'settings_dialog') and self.settings_dialog is not None:
@@ -1905,6 +2059,7 @@ class LoqinTrayApp:
         QApplication.processEvents()
         
         try:
+            from bs4 import BeautifulSoup
             response = requests.get(self.current_account_url, timeout=5)
             soup = BeautifulSoup(response.text, 'html.parser')
             
@@ -2005,7 +2160,7 @@ class LoqinTrayApp:
 
         self.timer = QTimer(self.app)
         self.timer.timeout.connect(self.trigger_manual_check)
-        self.timer.start(self.config.get("interval", 10) * 1000)
+        self.timer.start(self.config.get("interval", 30) * 1000)
 
         if not self.waiting_for_wifi_choice:
             self.trigger_manual_check()

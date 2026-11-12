@@ -49,7 +49,7 @@ Made for and by VITians.
 Features
 ========
 
-* **Automated Background Pinging:** Checks internet connection at regular intervals and logs back in immediately if disconnected.
+* **Event-Driven Background Monitoring:** Instantly detects Wi-Fi connections, disconnections, and network state changes via OS-native events, with an automated fallback check for captive portal expiry.
 * **Secure Credential Storage:** Employs OS-native credential management (Windows Credential Manager) via the ``keyring`` library.
 * **System Tray Integration:** Runs discreetly near your system clock with right-click menu controls and status notifications.
 * **Startup Launch:** Option to launch automatically whenever Windows boots up.
@@ -96,7 +96,7 @@ Right-click the Loqin icon in the system tray to open the quick action menu:
 * **Pause/Resume Loqin:** Will temporarily stop the worker thread.
 * **Performance Mode:** Will connect to the best BSSID on the network. (This may or may not change your network connectivity).
 * **Account Details:** Shows account details with data transactions, and change password.
-* **Configure Settings:** Opens the configuration window to update credentials, change check frequency (seconds), or toggle startup settings.
+* **Configure Settings:** Opens the configuration window to update credentials, change the fallback check interval (seconds), or toggle startup settings.
 * **Exit Loqin:** Closes the application completely.
 
 .. note::

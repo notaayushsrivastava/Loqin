@@ -1,0 +1,116 @@
+name: CI Tests & Build Validation
+
+on:
+  pull_request:
+    branches:
+      - master
+  push:
+    branches:
+      - 'feature/**'
+      - 'dev'
+      - 'fix/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.15
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.15'
+          cache: 'pip'
+
+      - name: Install Dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyobjc-framework-CoreWLAN
+          pip install -r requirements.txt
+
+      - name: Run Tests with pytest
+        run: |
+          python -m pytest tests/ -v
+
+  build-validation-windows:
+    name: Build Validation (Windows)
+    needs: test
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.15
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.15'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build Windows Executable
+        run: |
+          pyinstaller --clean --noconfirm Loqin.spec
+
+      - name: Verify Executable Exists
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist\Loqin.exe")) {
+            throw "dist\Loqin.exe was not created by PyInstaller!"
+          }
+          Write-Host "Windows executable generated successfully."
+
+  build-validation-macos:
+    name: Build Validation (macOS)
+    needs: test
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.15
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.15'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyobjc-framework-CoreWLAN
+          pip install -r requirements.txt
+
+      - name: Build macOS App Bundle
+        run: |
+          pyinstaller --clean --noconfirm Loqin_mac.spec
+
+      - name: Verify App Bundle Exists
+        run: |
+          if [ ! -d "dist/Loqin.app" ]; then
+            echo "dist/Loqin.app was not created by PyInstaller!"
+            exit 1
+          fi
+          echo "macOS app bundle generated successfully."

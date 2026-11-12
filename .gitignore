@@ -2,3 +2,15 @@
 *.bat
 production_app.py
 __pycache__/*
+.pytest_cache/*
+*.pyc
+
+
+build/
+dist/*
+Output/*
+
+# agents
+.agents/*
+*.md
+skills-lock.json

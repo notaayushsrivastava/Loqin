@@ -6,7 +6,7 @@ a = Analysis(
     ['mac.py'],
     pathex=[],
     binaries=[],
-    datas=[('assets', 'assets'), ('app.py', '.')],
+    datas=[('assets', 'assets'), ('app.py', '.'), ('network_monitor.py', '.')],
     hiddenimports=[
         'PyQt6',
         'PyQt6.QtCore',
