@@ -281,6 +281,15 @@ if sys.platform == "win32":
                 finally:
                     self._wlan_handle = None
                     self._c_callback = None
+else:
+    class WindowsNetworkEventMonitor(BaseNetworkEventMonitor):
+        """Stub for non-Windows platforms."""
+        def start(self) -> None:
+            self._is_running = True
+            self.monitor_error.emit("WindowsNetworkEventMonitor is only supported on Windows.")
+
+        def stop(self) -> None:
+            self._is_running = False
 
 
 # ============================================================================
